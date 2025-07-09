@@ -137,8 +137,11 @@ const LoginForm = () => {
           loop
           muted
           playsInline
+          preload="auto"
+          poster="/preview.jpg"
           className="absolute inset-0 w-full h-full object-cover"
         >
+          <source src="/arora.webm" type="video/webm" />
           <source src="/arora.mp4" type="video/mp4" />
         </motion.video>
 
