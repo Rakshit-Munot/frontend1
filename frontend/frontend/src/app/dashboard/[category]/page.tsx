@@ -4,7 +4,7 @@ import { useParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 
-const API_URL = 'http://localhost:8000/instruments'
+const API_URL = 'https://backend-4-x6ud.onrender.com/instruments'
 
 interface SubCategory {
   name: string
@@ -64,7 +64,7 @@ export default function CategoryPage() {
   useEffect(() => {
     const fetchRole = async () => {
       try {
-        const res = await fetch("http://localhost:8000/api/auth/check", { 
+        const res = await fetch("https://backend-4-x6ud.onrender.com/api/auth/check", { 
           credentials: "include",
           headers: {
             'Content-Type': 'application/json',

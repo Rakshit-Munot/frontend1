@@ -5,7 +5,7 @@ import Link from 'next/link'
 import PurchaseForm from './Form/page'
 import { useAuth } from '../AuthContext'
 
-const API_URL = 'http://localhost:8000/instruments/categories'
+const API_URL = 'https://backend-4-x6ud.onrender.com/instruments/categories'
 
 interface Category {
   id: number

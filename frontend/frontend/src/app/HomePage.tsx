@@ -25,7 +25,7 @@ const HomePage = () => {
 
   const handleLogout = async () => {
     try {
-      await fetch('http://localhost:8000/api/logout', {
+      await fetch('https://backend-4-x6ud.onrender.com/api/logout', {
         method: 'POST',
         credentials: 'include',
       });

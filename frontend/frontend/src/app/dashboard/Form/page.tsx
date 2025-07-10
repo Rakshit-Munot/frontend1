@@ -201,7 +201,7 @@
 
 import { useEffect, useState } from 'react'
 
-const API_URL = 'http://localhost:8000/instruments'
+const API_URL = 'https://backend-4-x6ud.onrender.com/instruments'
 
 const PurchaseForm = () => {
   const [formData, setFormData] = useState({

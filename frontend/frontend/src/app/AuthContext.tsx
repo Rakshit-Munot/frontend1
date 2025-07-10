@@ -36,7 +36,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     const checkSession = async () => {
       try {
-        const res = await fetch('http://localhost:8000/api/auth/check', {
+        const res = await fetch('https://backend-4-x6ud.onrender.com/api/auth/check', {
           credentials: 'include',
         })
         const data = await res.json()
@@ -61,7 +61,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, [])
 
   const logout = async () => {
-    await fetch('http://localhost:8000/api/logout', {
+    await fetch('https://backend-4-x6ud.onrender.com/api/logout', {
       method: 'POST',
       credentials: 'include',
     })
