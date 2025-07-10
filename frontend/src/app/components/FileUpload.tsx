@@ -1,14 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import {
-  CloudUpload,
-  CheckCircle,
-  XCircle,
-  FileText,
-  Trash2,
-  Eye,
-} from 'lucide-react';
+import { CloudUpload, CheckCircle, XCircle, FileText, Trash2, Eye } from 'lucide-react';
 
 interface UploadedFile {
   id: number;
@@ -18,25 +11,7 @@ interface UploadedFile {
   year?: string;
 }
 
-interface UserData {
-  role: 'admin' | 'faculty' | 'staff' | 'student';
-  roll_number?: string;
-}
-
-interface AuthResponse {
-  user?: UserData;
-}
-
-interface FileResponse {
-  id: number;
-  filename: string;
-  file?: string;
-  cdn_url?: string;
-  size: number;
-  year?: string;
-}
-
-type UserRole = UserData['role'] | null;
+type UserRole = 'admin' | 'faculty' | 'staff' | 'student' | null;
 
 export default function UploadPage() {
   const [uploading, setUploading] = useState(false);
@@ -45,36 +20,42 @@ export default function UploadPage() {
   const [success, setSuccess] = useState<boolean | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [role, setRole] = useState<UserRole>(null);
-
+  const [studentYear, setStudentYear] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Year selection
+  // Year selection state
   const [year, setYear] = useState<string>('Y22');
   const [customYear, setCustomYear] = useState<string>('');
-  const yearOptions = ['All', 'Y22', 'Y23', 'Y24', 'Custom'];
+  const yearOptions = ['All', 'Y22', 'Y23', 'Y24', 'Custom']; // Added 'All'
 
+  // Fetch user role and uploaded files on mount
   useEffect(() => {
-    // Get user role
-    fetch('http://localhost:8000/api/auth/check', {
-      credentials: 'include',
+    // Fetch user role
+    fetch("https://backend-4-x6ud.onrender.com/api/auth/check", {
+      credentials: "include",
     })
-      .then((res) => res.json())
-      .then((data: AuthResponse) => {
+      .then(res => res.json())
+      .then(data => {
         setRole(data?.user?.role || null);
+
+        // If student, extract year from roll number
+        if (data?.user?.role === "student" && data?.user?.roll_number) {
+          const match = data.user.roll_number.match(/^(\d{2})/);
+          if (match) setStudentYear(`Y${match[1]}`);
+        }
       });
 
-    // Get uploaded files
-    fetch('http://localhost:8000/api/uploaded-files', {
-      credentials: 'include',
+    // Fetch uploaded files
+    fetch("https://backend-4-x6ud.onrender.com/api/uploaded-files", {
+      credentials: "include",
     })
-      .then((res) => res.json())
-      .then((data: FileResponse[]) => {
+      .then(res => res.json())
+      .then(data => {
         setUploadedFiles(
-          data.map((file) => ({
+          data.map((file: any) => ({
             id: file.id,
             filename: file.filename,
-            url:
-              file.cdn_url || (file.file ? `http://localhost:8000${file.file}` : ''),
+            url: file.cdn_url || (file.file ? `https://backend-4-x6ud.onrender.com${file.file}` : ""),
             size: file.size,
             year: file.year,
           }))
@@ -82,6 +63,7 @@ export default function UploadPage() {
       });
   }, []);
 
+  // Simulate progress for demo (remove if backend supports progress)
   const simulateProgress = () => {
     setProgress(0);
     let prog = 0;
@@ -95,8 +77,8 @@ export default function UploadPage() {
 
   const handleUpload = async (file: File) => {
     const formData = new FormData();
-    const selectedYear = year === 'Custom' ? customYear : year;
     formData.append('file', file);
+    const selectedYear = year === 'Custom' ? customYear : year;
     formData.append('year', selectedYear);
 
     setUploading(true);
@@ -104,16 +86,17 @@ export default function UploadPage() {
     setMessage('');
     setSuccess(null);
 
+    // Simulate progress bar
     const interval = simulateProgress();
 
     try {
-      const res = await fetch('http://localhost:8000/api/upload', {
-        method: 'POST',
+      const response = await fetch("https://backend-4-x6ud.onrender.com/api/upload", {
+        method: "POST",
         body: formData,
-        credentials: 'include',
+        credentials: "include",
       });
 
-      const result = await res.json();
+      const result = await response.json();
 
       clearInterval(interval);
       setProgress(100);
@@ -121,13 +104,11 @@ export default function UploadPage() {
       if (result.success) {
         setMessage(`Uploaded: ${result.filename}`);
         setSuccess(true);
-        setUploadedFiles((prev) => [
+        setUploadedFiles(prev => [
           {
             id: result.id,
             filename: result.filename,
-            url:
-              result.url ||
-              `http://localhost:8000/media/uploads/${result.filename}`,
+            url: result.url || `https://backend-4-x6ud.onrender.com/media/uploads/${result.filename}`,
             size: result.size,
             year: selectedYear,
           },
@@ -136,11 +117,10 @@ export default function UploadPage() {
       } else {
         throw new Error(result.error || 'Upload failed');
       }
-    } catch (e) {
+    } catch (err: any) {
       clearInterval(interval);
       setProgress(100);
-      const err = e as Error;
-      setMessage(err.message);
+      setMessage(err.message || 'Upload failed');
       setSuccess(false);
     } finally {
       setUploading(false);
@@ -149,28 +129,23 @@ export default function UploadPage() {
   };
 
   const handleDelete = async (fileId: number) => {
-    if (!window.confirm('Are you sure you want to delete this file?')) return;
-
+    if (!window.confirm("Are you sure you want to delete this file?")) return;
     try {
-      const res = await fetch(
-        `http://localhost:8000/api/uploaded-files/${fileId}/delete`,
-        {
-          method: 'DELETE',
-          credentials: 'include',
-        }
-      );
-
-      if (res.ok) {
-        setUploadedFiles((prev) => prev.filter((f) => f.id !== fileId));
-        setMessage('File deleted successfully.');
+      const response = await fetch(`https://backend-4-x6ud.onrender.com/api/uploaded-files/${fileId}/delete`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (response.ok) {
+        setUploadedFiles(prev => prev.filter(f => f.id !== fileId));
+        setMessage("File deleted successfully.");
         setSuccess(true);
       } else {
-        const result = await res.json();
-        setMessage(result.detail || 'Failed to delete file.');
+        const result = await response.json();
+        setMessage(result.detail || "Failed to delete file.");
         setSuccess(false);
       }
-    } catch {
-      setMessage('Failed to delete file.');
+    } catch (err: any) {
+      setMessage("Failed to delete file.");
       setSuccess(false);
     }
   };
@@ -181,56 +156,50 @@ export default function UploadPage() {
   };
 
   const formatFileSize = (bytes: number) => {
-    if (bytes === 0) return '0 Bytes';
+    if (bytes === 0) return "0 Bytes";
     const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const sizes = ["Bytes", "KB", "MB", "GB"];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
   };
 
+  // Only admin and faculty can upload/delete
   const canUpload = role === 'admin' || role === 'faculty';
   const canDelete = canUpload;
 
+  // Filter files for students by year selection
   const filesToShow =
-    role === 'student'
-      ? year === 'All'
+    role === "student"
+      ? year === "All"
         ? uploadedFiles
-        : uploadedFiles.filter(
-            (file) =>
-              file.year === 'All' ||
-              file.year === (year === 'Custom' ? customYear : year)
-          )
+        : uploadedFiles.filter((file) => 
+          file.year === "All" || file.year === (year === "Custom" ? customYear : year)
+      )
       : uploadedFiles;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-800 flex flex-col items-center justify-start p-6">
-      {/* Upload Area */}
+      {/* Upload Section */}
       {canUpload && (
         <div className="bg-white/10 backdrop-blur-xl rounded-2xl shadow-2xl p-10 w-full max-w-md flex flex-col items-center border border-white/20 mt-10">
           <div className="mb-6 flex flex-col items-center">
             <CloudUpload className="w-14 h-14 text-indigo-400 mb-2 drop-shadow-lg" />
-            <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">
-              Upload File
-            </h1>
+            <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">Upload File</h1>
             <p className="text-slate-300 text-center text-sm">
-              Upload your files securely and quickly.
-              <br />
+              Upload your files securely and quickly.<br />
               Supported: images, docs, and more.
             </p>
           </div>
-
-          {/* Year select */}
+          {/* Year selection */}
           <div className="w-full flex flex-col items-center mb-4">
             <label className="text-white mb-2 font-medium">Select Year:</label>
             <select
               value={year}
-              onChange={(e) => setYear(e.target.value)}
+              onChange={e => setYear(e.target.value)}
               className="w-full rounded px-3 py-2 bg-slate-800 text-white border border-slate-600 focus:outline-none"
             >
-              {yearOptions.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
+              {yearOptions.map(opt => (
+                <option key={opt} value={opt}>{opt}</option>
               ))}
             </select>
             {year === 'Custom' && (
@@ -238,20 +207,15 @@ export default function UploadPage() {
                 type="text"
                 placeholder="Enter custom year (e.g. Y25)"
                 value={customYear}
-                onChange={(e) => setCustomYear(e.target.value)}
+                onChange={e => setCustomYear(e.target.value)}
                 className="w-full mt-2 rounded px-3 py-2 bg-slate-800 text-white border border-slate-600 focus:outline-none"
               />
             )}
           </div>
-
           <label
             htmlFor="file-upload"
             className={`w-full flex flex-col items-center justify-center border-2 border-dashed rounded-xl cursor-pointer transition-all duration-200
-              ${
-                uploading
-                  ? 'border-indigo-400 bg-indigo-100/30'
-                  : 'border-slate-400 hover:border-indigo-400 hover:bg-indigo-100/10'
-              }
+              ${uploading ? 'border-indigo-400 bg-indigo-100/30' : 'border-slate-400 hover:border-indigo-400 hover:bg-indigo-100/10'}
               py-8 mb-6`}
           >
             <input
@@ -266,7 +230,6 @@ export default function UploadPage() {
               Click or drag file to upload
             </span>
           </label>
-
           {uploading && (
             <div className="w-full max-w-xs mb-2 bg-slate-200 h-2 rounded overflow-hidden">
               <div
@@ -275,14 +238,12 @@ export default function UploadPage() {
               />
             </div>
           )}
-
           {message && (
-            <div
-              className={`flex items-center gap-2 mt-4 px-4 py-2 rounded-lg text-sm font-medium
+            <div className={`flex items-center gap-2 mt-4 px-4 py-2 rounded-lg text-sm font-medium
               ${success === true ? 'bg-green-100 text-green-700' : ''}
               ${success === false ? 'bg-red-100 text-red-700' : ''}
-              ${success === null ? 'bg-slate-100 text-slate-700' : ''}`}
-            >
+              ${success === null ? 'bg-slate-100 text-slate-700' : ''}
+            `}>
               {success === true && <CheckCircle className="w-5 h-5 text-green-500" />}
               {success === false && <XCircle className="w-5 h-5 text-red-500" />}
               {message}
@@ -291,7 +252,7 @@ export default function UploadPage() {
         </div>
       )}
 
-      {/* Uploaded files */}
+      {/* Uploaded Files Section */}
       <div className="w-full max-w-2xl mt-12">
         <h2 className="text-xl font-semibold text-white mb-4">Uploaded Files</h2>
         {filesToShow.length === 0 ? (

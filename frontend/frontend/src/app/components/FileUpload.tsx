@@ -31,7 +31,7 @@ export default function UploadPage() {
   // Fetch user role and uploaded files on mount
   useEffect(() => {
     // Fetch user role
-    fetch("http://localhost:8000/api/auth/check", {
+    fetch("https://backend-4-x6ud.onrender.com/api/auth/check", {
       credentials: "include",
     })
       .then(res => res.json())
@@ -46,7 +46,7 @@ export default function UploadPage() {
       });
 
     // Fetch uploaded files
-    fetch("http://localhost:8000/api/uploaded-files", {
+    fetch("https://backend-4-x6ud.onrender.com/api/uploaded-files", {
       credentials: "include",
     })
       .then(res => res.json())
@@ -55,7 +55,7 @@ export default function UploadPage() {
           data.map((file: any) => ({
             id: file.id,
             filename: file.filename,
-            url: file.cdn_url || (file.file ? `http://localhost:8000${file.file}` : ""),
+            url: file.cdn_url || (file.file ? `https://backend-4-x6ud.onrender.com${file.file}` : ""),
             size: file.size,
             year: file.year,
           }))
@@ -90,7 +90,7 @@ export default function UploadPage() {
     const interval = simulateProgress();
 
     try {
-      const response = await fetch("http://localhost:8000/api/upload", {
+      const response = await fetch("https://backend-4-x6ud.onrender.com/api/upload", {
         method: "POST",
         body: formData,
         credentials: "include",
@@ -108,7 +108,7 @@ export default function UploadPage() {
           {
             id: result.id,
             filename: result.filename,
-            url: result.url || `http://localhost:8000/media/uploads/${result.filename}`,
+            url: result.url || `https://backend-4-x6ud.onrender.com/media/uploads/${result.filename}`,
             size: result.size,
             year: selectedYear,
           },
@@ -131,7 +131,7 @@ export default function UploadPage() {
   const handleDelete = async (fileId: number) => {
     if (!window.confirm("Are you sure you want to delete this file?")) return;
     try {
-      const response = await fetch(`http://localhost:8000/api/uploaded-files/${fileId}/delete`, {
+      const response = await fetch(`https://backend-4-x6ud.onrender.com/api/uploaded-files/${fileId}/delete`, {
         method: "DELETE",
         credentials: "include",
       });
