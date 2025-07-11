@@ -4,7 +4,7 @@ const nextConfig = {
     return [
       {
         source: '/:filename',
-        destination: '/api/file?filename=:filename',
+        destination: '/api/file/:filename',
       },
     ];
   },
