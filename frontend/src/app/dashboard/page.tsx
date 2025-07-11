@@ -5,7 +5,7 @@ import Link from 'next/link'
 import PurchaseForm from './Form/page'
 import { useAuth } from '../AuthContext'
 
-const API_URL = 'http://localhost:8000/instruments/categories'
+const API_URL = 'https://backend-4-x6ud.onrender.com/instruments/categories'
 
 interface Category {
   id: number
@@ -58,7 +58,7 @@ export default function DashboardPage() {
   useEffect(() => {
     if (user?.role === 'admin') {
       setRequestsLoading(true)
-      fetch('http://localhost:8000/instruments/issue-requests/?status=pending', { credentials: 'include' })
+      fetch('https://backend-4-x6ud.onrender.com/instruments/issue-requests/?status=pending', { credentials: 'include' })
         .then(res => res.json())
         .then(setRequests)
         .catch(() => setRequests([]))
@@ -161,7 +161,7 @@ export default function DashboardPage() {
                           disabled={processingId === req.id}
                           onClick={async () => {
                             setProcessingId(req.id)
-                            const res = await fetch(`http://localhost:8000/instruments/issue-requests/${req.id}/approve`, {
+                            const res = await fetch(`https://backend-4-x6ud.onrender.com/instruments/issue-requests/${req.id}/approve`, {
                               method: 'POST',
                               credentials: 'include',
                             });
@@ -181,7 +181,7 @@ export default function DashboardPage() {
                           disabled={processingId === req.id}
                           onClick={async () => {
                             setProcessingId(req.id)
-                            await fetch(`http://localhost:8000/instruments/issue-requests/${req.id}/reject`, {
+                            await fetch(`https://backend-4-x6ud.onrender.com/instruments/issue-requests/${req.id}/reject`, {
                               method: 'POST',
                               credentials: 'include',
                             });

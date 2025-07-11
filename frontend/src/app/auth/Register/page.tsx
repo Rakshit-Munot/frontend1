@@ -16,7 +16,7 @@ interface JwtDecoded {
   [key: string]: unknown;
 }
 
-const API_URL = 'http://localhost:8000/api/auth';
+const API_URL = 'https://backend-4-x6ud.onrender.com/api/auth';
 
 const SignUpForm = () => {
   const router = useRouter();

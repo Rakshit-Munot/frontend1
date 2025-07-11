@@ -33,7 +33,7 @@ const Sidebar = () => {
   // Fetch user role and uploaded files
   useEffect(() => {
     // Fetch user role
-    fetch("http://localhost:8000/api/auth/check", {
+    fetch("https://backend-4-x6ud.onrender.com/api/auth/check", {
       credentials: "include",
     })
       .then(res => res.json())
@@ -48,7 +48,7 @@ const Sidebar = () => {
       });
 
     // Fetch uploaded files
-    fetch("http://localhost:8000/api/uploaded-files", {
+    fetch("https://backend-4-x6ud.onrender.com/api/uploaded-files", {
       credentials: "include",
     })
       .then(res => res.json())

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 
-const API_URL = 'http://localhost:8000/api/admin/import-users'; // adjust if needed
+const API_URL = 'https://backend-4-x6ud.onrender.com/api/admin/import-users'; // adjust if needed
 
 interface FailedImport {
   row: number;

@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import GoogleLoginButton from '@/app/GoogleLoginB';
 import { useAuth } from '@/app/AuthContext';
 
-const API_URL = 'http://localhost:8000/api';
+const API_URL = 'https://backend-4-x6ud.onrender.com/api';
 
 const LoginForm = () => {
   const router = useRouter();
