@@ -111,7 +111,7 @@ export default function UploadPage() {
           {
             id: result.id,
             filename: result.filename,
-            url: result.url || `https://backend-4-x6ud.onrender.com/media/uploads/${result.filename}`,
+            url: result.cdn_url,
             size: result.size,
             year: selectedYear,
           },
