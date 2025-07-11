@@ -1,15 +1,13 @@
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
+/** @type {import('next').NextConfig} */
+const nextConfig = {
   async rewrites() {
     return [
       {
-        source: "/:filename",
-        destination: "/api/file?filename=:filename",
+        source: '/:filename',
+        destination: '/api/file?filename=:filename',
       },
     ];
   },
-  // You can add more config options below if needed
 };
 
-export default nextConfig;
+module.exports = nextConfig;
