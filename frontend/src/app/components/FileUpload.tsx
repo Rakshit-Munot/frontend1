@@ -61,7 +61,7 @@ export default function UploadPage() {
           data.map(file => ({
             id: file.id,
             filename: file.filename,
-            url: file.url || file.cdn_url || (file.file ? `https://backend-4-x6ud.onrender.com${file.file}` : ""),
+            url: file.cdn_url || file.url || (file.file ? `https://backend-4-x6ud.onrender.com${file.file}` : ""),
             size: file.size,
             year: file.year,
           }))
@@ -113,11 +113,12 @@ export default function UploadPage() {
       })
         .then(res => res.json())
         .then((data: UploadedFileAPI[]) => {
+          console.log("Fetched files:", data); // 👀
           setUploadedFiles(
             data.map(file => ({
               id: file.id,
               filename: file.filename,
-              url: file.url || file.cdn_url || (file.file ? `https://backend-4-x6ud.onrender.com${file.file}` : ""),
+              url: file.cdn_url || file.url || (file.file ? `https://backend-4-x6ud.onrender.com${file.file}` : ""),
               size: file.size,
               year: file.year,
             }))
