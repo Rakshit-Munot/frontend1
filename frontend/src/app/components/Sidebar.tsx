@@ -57,7 +57,9 @@ const Sidebar = () => {
           data.map((file) => ({
             id: file.id,
             filename: file.filename,
-            url: file.cdn_url || (file.file ? `https://backend-4-x6ud.onrender.com${file.file}` : ""),
+            url: file.cdn_url
+            ? `https://backend-4-x6ud.onrender.com/api/secure-stream?path=${encodeURIComponent(file.cdn_url)}`
+            : "",
             size: file.size,
             uploaded_at: file.uploaded_at,
             year: file.year,
