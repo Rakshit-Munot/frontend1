@@ -20,7 +20,7 @@ export default function GoogleLoginButton() {
     }
 
     const res = await axios.post(
-      'https://backend-4-x6ud.onrender.com//api/auth/google-login',
+      'https://backend-4-x6ud.onrender.com/api/auth/google-login',
       { token },
       { withCredentials: true }
     );
