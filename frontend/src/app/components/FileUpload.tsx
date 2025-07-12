@@ -108,16 +108,21 @@ export default function UploadPage() {
       if (result.success) {
         setMessage(`Uploaded: ${result.filename}`);
         setSuccess(true);
-        setUploadedFiles(prev => [
-          {
-            id: result.id,
-            filename: result.filename,
-            url: result.url || result.cdn_url,
-            size: result.size,
-            year: selectedYear,
-          },
-          ...prev,
-        ]);
+            fetch("https://backend-4-x6ud.onrender.com/api/uploaded-files", {
+        credentials: "include",
+      })
+        .then(res => res.json())
+        .then((data: UploadedFileAPI[]) => {
+          setUploadedFiles(
+            data.map(file => ({
+              id: file.id,
+              filename: file.filename,
+              url: file.url || file.cdn_url || (file.file ? `https://backend-4-x6ud.onrender.com${file.file}` : ""),
+              size: file.size,
+              year: file.year,
+            }))
+          );
+        });
       } else {
         throw new Error(result.error || 'Upload failed');
       }
