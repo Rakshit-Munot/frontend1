@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import './custom.scss';
 import { GoogleOAuthProvider } from "@react-oauth/google";
 import { AuthProvider } from "./AuthContext";
-
+import ProtectedRoute from "./components/ProtectedRoute"
+import SidebarDrawer from "./components/SidebarDrawer";
+import TopHeader from "./components/TopHeader"
 // Fonts
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -34,7 +37,16 @@ export default function RootLayout({
       >
         <GoogleOAuthProvider clientId="325790879889-ve0qa2du4ot9b4nr6v4kgbsg6nvl4kfi.apps.googleusercontent.com">
            <AuthProvider>
-            {children}
+            {/* uvicorn backend1.asgi:application --reload 
+            celery -A backend1 worker -l info -P solo
+            */}
+            {/* Global sidebar drawer visible on all pages */}
+            <SidebarDrawer />
+            {/* Global top header with LNMIIT logo (left) and profile icon (right) */}
+            <TopHeader />
+            <ProtectedRoute>
+              {children}
+            </ProtectedRoute>
           </AuthProvider>
         </GoogleOAuthProvider>
       </body>

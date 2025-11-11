@@ -29,9 +29,16 @@ interface UploadedFileAPI {
 }
 
 interface AuthCheckResponse {
+  authenticated: boolean;
   user?: {
+    id?: string;
+    username?: string;
+    email?: string;
     role?: "admin" | "faculty" | "staff" | "student";
     roll_number?: string;
+    department?: string;
+    year?: string;
+    // ...other fields
   };
 }
 
@@ -44,6 +51,7 @@ export default function UploadPage() {
   const [success, setSuccess] = useState<boolean | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [role, setRole] = useState<UserRole>(null);
+  const [studentYear, setStudentYear] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [year, setYear] = useState<string>("Y22");
@@ -51,19 +59,50 @@ export default function UploadPage() {
   const yearOptions = ["All", "Y22", "Y23", "Y24", "Custom"];
 
   useEffect(() => {
-    fetch("https://backend-4-x6ud.onrender.com/api/auth/check", {
+    // 1. Auth role (using /api/auth/full-detail)
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/full-detail`, {
       credentials: "include",
     })
       .then((res) => res.json())
       .then((data: AuthCheckResponse) => {
         setRole(data?.user?.role || null);
+        if (data?.user?.role === "student" && data?.user?.year) {
+          setStudentYear(data.user.year);
+        }
       });
 
-    loadUploadedFiles(); // ⬅ Reuse this to keep logic clean
+    // 2. Initial load
+    loadUploadedFiles();
+
+    // 3. WebSocket connection
+    const ws = new WebSocket(
+      `${process.env.NEXT_PUBLIC_WS_URL || "ws://127.0.0.1:8000"}/ws/files/`
+    );
+    ws.onopen = () => console.log("✅ Connected to backend WS");
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+
+      if (data.event === "created") {
+        setUploadedFiles((prev) => [
+          ...prev,
+          {
+            id: data.id,
+            filename: data.filename,
+            url: `${process.env.NEXT_PUBLIC_API_URL}/api/secure-stream?path=${encodeURIComponent(data.cdn_url)}`,
+            size: data.size,
+            year: data.year,
+          },
+        ]);
+      } else if (data.event === "deleted") {
+        setUploadedFiles((prev) => prev.filter((f) => f.id !== data.id));
+      }
+    };
+    ws.onclose = () => console.log("❌ Disconnected");
+    return () => ws.close();
   }, []);
 
   const loadUploadedFiles = () => {
-    fetch("https://backend-4-x6ud.onrender.com/api/uploaded-files", {
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/uploaded-files`, {
       credentials: "include",
     })
       .then((res) => {
@@ -76,8 +115,8 @@ export default function UploadPage() {
             id: file.id,
             filename: file.filename,
             url: file.cdn_url
-            ? `https://backend-4-x6ud.onrender.com/api/secure-stream?path=${encodeURIComponent(file.cdn_url)}`
-            : "",
+              ? `${process.env.NEXT_PUBLIC_API_URL}/api/secure-stream?path=${encodeURIComponent(file.cdn_url)}`
+              : "",
             size: file.size,
             year: file.year,
           }))
@@ -102,8 +141,8 @@ export default function UploadPage() {
   };
 
   const handleUpload = async (file: File) => {
-    const formData = new FormData();
     const selectedYear = year === "Custom" ? customYear : year;
+    const formData = new FormData();
     formData.append("file", file);
     formData.append("year", selectedYear);
 
@@ -112,46 +151,61 @@ export default function UploadPage() {
     setMessage("");
     setSuccess(null);
 
-    const interval = simulateProgress();
-
-    try {
-      const response = await fetch(
-        "https://backend-4-x6ud.onrender.com/api/upload",
-        {
-          method: "POST",
-          body: formData,
-          credentials: "include",
-        }
-      );
-
-      const result = await response.json();
-      clearInterval(interval);
-      setProgress(100);
-
-      if (result.success) {
-        setMessage(`Uploaded: ${result.filename}`);
-        setSuccess(true);
-        loadUploadedFiles(); // ✅ reload updated files
-      } else {
-        throw new Error(result.error || "Upload failed");
+    const xhr = new XMLHttpRequest();
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        setProgress(Math.round((event.loaded / event.total) * 100));
       }
-    } catch (err: unknown) {
-      clearInterval(interval);
-      const error = err as Error;
+    };
+
+    xhr.onload = async () => {
       setProgress(100);
-      setMessage(error.message || "Upload failed");
-      setSuccess(false);
-    } finally {
       setUploading(false);
-      setTimeout(() => setProgress(0), 1200);
-    }
+
+      try {
+        const result = JSON.parse(xhr.responseText);
+        if (result.success) {
+          setMessage(`Uploaded: ${result.filename}`);
+          setSuccess(true);
+
+          // Save metadata
+          await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/save-file-meta`, {
+            method: "POST",
+            body: JSON.stringify({ filename: result.filename, size: file.size, year: selectedYear, cdn_url: result.url }),
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+          });
+
+          loadUploadedFiles();
+        } else {
+          throw new Error(result.error || "Upload failed");
+        }
+      } catch (err) {
+        const error = err as Error;
+        setMessage(error.message || "Upload failed");
+        setSuccess(false);
+      } finally {
+        setTimeout(() => setProgress(0), 1200);
+      }
+    };
+
+    xhr.onerror = () => {
+      setUploading(false);
+      setMessage("Upload failed.");
+      setSuccess(false);
+      setProgress(0);
+    };
+
+    xhr.open("POST", `${process.env.NEXT_PUBLIC_API_URL}/api/upload`);
+    xhr.withCredentials = true;
+    xhr.send(formData);
   };
 
   const handleDelete = async (fileId: number) => {
     if (!window.confirm("Are you sure you want to delete this file?")) return;
     try {
       const response = await fetch(
-        `https://backend-4-x6ud.onrender.com/api/uploaded-files/${fileId}/delete`,
+        `${process.env.NEXT_PUBLIC_API_URL}/api/uploaded-files/${fileId}/delete`,
         {
           method: "DELETE",
           credentials: "include",
@@ -188,16 +242,18 @@ export default function UploadPage() {
   const canUpload = role === "admin" || role === "faculty";
   const canDelete = canUpload;
 
-  const filesToShow =
-    role === "student"
-      ? year === "All"
-        ? uploadedFiles
-        : uploadedFiles.filter(
-            (file) =>
-              file.year === "All" ||
-              file.year === (year === "Custom" ? customYear : year)
-          )
-      : uploadedFiles;
+  // Role-based file viewing logic
+  let filesToShow: UploadedFile[] = uploadedFiles;
+  if (role === "student") {
+    filesToShow = uploadedFiles.filter(
+      (file) =>
+        file.year === "All" ||
+        (studentYear && file.year === studentYear)
+    );
+  } else if (role === "staff") {
+    filesToShow = uploadedFiles;
+  }
+  // Admin/faculty can see all files
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-800 flex flex-col items-center justify-start p-6">

@@ -9,7 +9,7 @@ import { useAuth } from './AuthContext';
 export default function GoogleLoginButton() {
   const router = useRouter();
   const { setIsAuthenticated } = useAuth();
-
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL;
  const handleLogin = async (response: CredentialResponse) => {
   try {
     const token = response.credential;
@@ -20,7 +20,7 @@ export default function GoogleLoginButton() {
     }
 
     const res = await axios.post(
-      'https://backend-4-x6ud.onrender.com/api/auth/google-login',
+      `${apiUrl}/api/auth/google-login`,
       { token },
       { withCredentials: true }
     );

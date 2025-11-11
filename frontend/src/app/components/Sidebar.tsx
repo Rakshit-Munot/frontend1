@@ -33,7 +33,7 @@ const Sidebar = () => {
   // Fetch user role and uploaded files
   useEffect(() => {
     // Fetch user role
-    fetch("https://backend-4-x6ud.onrender.com/api/auth/check", {
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/check`, {
       credentials: "include",
     })
       .then(res => res.json())
@@ -48,7 +48,7 @@ const Sidebar = () => {
       });
 
     // Fetch uploaded files
-    fetch("https://backend-4-x6ud.onrender.com/api/uploaded-files", {
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/uploaded-files`, {
       credentials: "include",
     })
       .then(res => res.json())
@@ -58,7 +58,7 @@ const Sidebar = () => {
             id: file.id,
             filename: file.filename,
             url: file.cdn_url
-            ? `https://backend-4-x6ud.onrender.com/api/secure-stream?path=${encodeURIComponent(file.cdn_url)}`
+            ? `${process.env.NEXT_PUBLIC_API_URL}/api/secure-stream?path=${encodeURIComponent(file.cdn_url)}`
             : "",
             size: file.size,
             uploaded_at: file.uploaded_at,

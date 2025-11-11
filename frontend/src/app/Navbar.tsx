@@ -21,12 +21,9 @@ const Navbar = () => {
     { href: "/", label: "Home" },
     // { href: "/about", label: "About" },
     // { href: "/services", label: "Services" },
-    { href: "/dashboard", label: "DashBoard" },
     { href: "/Equipments", label: "Equipments" },
-    { href: "/research", label: "Research Papers" },
-    { href: "/timetable", label: "Timetable" },
+    { href: "/Dash", label: "Bills" },
     { href: "/Handouts", label: "Handouts" },
-    { href: "/flowchart", label: "FlowChart" },
   ];
 
   // if(isAuthenticated) {

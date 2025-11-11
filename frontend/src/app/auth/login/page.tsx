@@ -1,13 +1,14 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import Head from 'next/head';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import GoogleLoginButton from '@/app/GoogleLoginB';
 import { useAuth } from '@/app/AuthContext';
 
-const API_URL = 'https://backend-4-x6ud.onrender.com/api';
+const API_URL = `${process.env.NEXT_PUBLIC_API_URL}/api`;
 
 const LoginForm = () => {
   const router = useRouter();
@@ -18,18 +19,21 @@ const LoginForm = () => {
   const [errors, setErrors] = useState<string[]>([]);
   const [showSuccessAlert, setShowSuccessAlert] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [isUnlocked, setIsUnlocked] = useState(false);
+  const [fadeOut, setFadeOut] = useState(false);
 
-  const showAlert = () => {
-    setShowSuccessAlert(true);
-    setTimeout(() => setShowSuccessAlert(false), 3000);
-  };
+  useEffect(() => {
+    if (fadeOut) {
+      const timeout = setTimeout(() => {
+        router.replace('/');
+      }, 500);
+      return () => clearTimeout(timeout);
+    }
+  }, [fadeOut, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrors([]);
     setIsLoading(true);
-
     try {
       const response = await fetch(`${API_URL}/login`, {
         method: 'POST',
@@ -37,55 +41,47 @@ const LoginForm = () => {
         credentials: 'include',
         body: JSON.stringify({ email, password }),
       });
+      
+      // FIX: Typed data as unknown
+      const data: unknown = await response.json().catch(() => ({}));
 
-      const data = await response.json();
-
-      if (response.ok) {
-        setIsUnlocked(true);
-        showAlert();
-        setEmail('');
-        setPassword('');
-        setIsAuthenticated(true);
-
-        const authRes = await fetch(`${API_URL}/auth/check`, {
-          credentials: 'include',
-        });
-        const authData = await authRes.json();
-
-        if (authData.authenticated) {
-          setUser({
-            id: authData.id,
-            username: authData.username,
-            email: authData.email,
-            role: authData.role,
-          });
-        }
-
-        setTimeout(() => router.replace('/'), 3000);
-      } else {
-        setIsUnlocked(false);
-        const tmpErrors: string[] = [];
-
-        if (Array.isArray(data) && data[0]?.msg) {
-          data.forEach((err) => tmpErrors.push(err.msg || 'Unknown error'));
-        } else if (data.detail) {
-          tmpErrors.push(String(data.detail));
-        } else {
-          for (const value of Object.values(data)) {
-            if (Array.isArray(value)) {
-              value.forEach((val) => tmpErrors.push(String(val)));
-            } else {
-              tmpErrors.push(String(value));
-            }
+      if (!response.ok) {
+        const tmp: string[] = [];
+        if (data && typeof data === 'object') {
+          // FIX: Replaced 'any' with 'Record<string, unknown>' for type-safe access
+          const detail = (data as Record<string, unknown>).detail;
+          if (Array.isArray(detail)) {
+            // FIX: Replaced 'any' with 'unknown'
+            detail.forEach((d: unknown) => tmp.push((d as { msg: string })?.msg || String(d)));
+          } else {
+            // FIX: Replaced 'any' with 'unknown'
+            Object.values(data).forEach((v: unknown) => Array.isArray(v) ? v.forEach((x: unknown) => tmp.push(String(x))) : tmp.push(String(v)));
           }
         }
-
-        setErrors(tmpErrors);
+        setErrors(tmp.length ? tmp : ['Invalid email or password.']);
+        setIsLoading(false);
+        return;
       }
-    } catch (err) {
-      setErrors([
-        err instanceof Error ? err.message : 'An unexpected error occurred.',
-      ]);
+
+      const authRes = await fetch(`${API_URL}/auth/check`, { credentials: 'include' });
+      const authData = await authRes.json().catch(() => ({}));
+      if (authData?.authenticated && authData?.user) {
+        setUser({ id: authData.user.id, username: authData.user.username, email: authData.user.email, role: authData.user.role });
+        setIsAuthenticated(true);
+        setFadeOut(true);
+        setShowSuccessAlert(true);
+      } else {
+        setIsAuthenticated(false);
+        setUser(null);
+        setErrors(['Invalid email or password.']);
+      }
+    } catch (err: unknown) { // FIX: Changed 'any' to 'unknown'
+      // FIX: Added instanceof Error check for type safety
+      if (err instanceof Error) {
+        setErrors([err.message]);
+      } else {
+        setErrors(['An unexpected error occurred.']);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -93,7 +89,22 @@ const LoginForm = () => {
 
   return (
     <>
-      {/* Success Alert */}
+      {/* Preconnect hints for API/WS to reduce handshake latency */}
+      <Head>
+        {process.env.NEXT_PUBLIC_API_URL && (
+          <>
+            <link rel="preconnect" href={process.env.NEXT_PUBLIC_API_URL} />
+            <link rel="dns-prefetch" href={process.env.NEXT_PUBLIC_API_URL} />
+          </>
+        )}
+        {process.env.NEXT_PUBLIC_WS_URL && (
+          <>
+            <link rel="preconnect" href={process.env.NEXT_PUBLIC_WS_URL} />
+            <link rel="dns-prefetch" href={process.env.NEXT_PUBLIC_WS_URL} />
+          </>
+        )}
+      </Head>
+      {/* ✅ Success Alert */}
       <AnimatePresence>
         {showSuccessAlert && (
           <motion.div
@@ -126,148 +137,120 @@ const LoginForm = () => {
         )}
       </AnimatePresence>
 
-      {/* Login UI */}
-      <div className="min-h-screen flex items-center justify-center bg-black text-white p-4 relative overflow-hidden">
-        {/* Aurora video */}
-        <motion.video
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 0.4 }}
-          transition={{ duration: 1.5 }}
-          autoPlay
-          loop
-          muted
-          playsInline
-          preload="auto"
-          poster="/preview.jpg"
-          className="absolute inset-0 w-full h-full object-cover"
-        >
-          <source src="/arora.webm" type="video/webm" />
-          <source src="/arora.mp4" type="video/mp4" />
-        </motion.video>
+      {/* Login UI using provided structure/classes */}
+      <motion.div
+        initial={{ opacity: 1 }}
+        animate={{ opacity: fadeOut ? 0 : 1 }}
+        transition={{ duration: 0.3, ease: 'easeInOut' }}
+        className="min-h-screen flex flex-col bg-white"
+        style={{ fontFamily: 'Segoe UI, Tahoma, Geneva, Verdana, sans-serif' }}
+      >
+        <div className="header"><div style={{ margin: 'auto' }}>LNMIIT Employee Laboratory Management Portal</div></div>
 
-        {/* Login Container */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8 }}
-          className="relative z-10 w-full max-w-sm p-8 rounded-2xl bg-white/5 backdrop-blur-lg shadow-xl border border-white/10"
-        >
-          {/* Lock Icon */}
-          <motion.div
-            className="flex justify-center mb-6"
-            animate={isUnlocked ? { rotate: -20, y: -10 } : { rotate: 0, y: 0 }}
-            transition={{ type: 'spring', stiffness: 400, damping: 20 }}
-          >
-            <motion.svg
-              width={56}
-              height={56}
-              viewBox="0 0 56 56"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <defs>
-                <radialGradient id="lockBodyGradient" cx="50%" cy="50%" r="70%">
-                  <stop offset="0%" stopColor="#a5b4fc" />
-                  <stop offset="100%" stopColor="#1e293b" />
-                </radialGradient>
-                <linearGradient id="shackleGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#f1f5f9" />
-                  <stop offset="100%" stopColor="#64748b" />
-                </linearGradient>
-              </defs>
-              <motion.path
-                d="M16 28V18C16 10.268 22.268 4 30 4C37.732 4 44 10.268 44 18V28"
-                stroke="url(#shackleGradient)"
-                strokeWidth="3.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                animate={isUnlocked ? { y: -12, rotate: -25, x: 4 } : { y: 0, rotate: 0, x: 0 }}
-              />
-              <rect
-                x="12"
-                y="28"
-                width="36"
-                height="22"
-                rx="6"
-                fill="url(#lockBodyGradient)"
-                stroke="#64748b"
-                strokeWidth="2.5"
-              />
-              <ellipse cx="30" cy="39.5" rx="2.5" ry="4.5" fill="#334155" opacity="0.4" />
-              <ellipse cx="30" cy="38" rx="1.5" ry="2.5" fill="#fff" />
-            </motion.svg>
-          </motion.div>
+        <div className="no-sidebar-body">
+          <form className="user-manager-dialog-box" onSubmit={handleSubmit}>
+            <Image src="/LNMIIT-logo.jpg" alt="LNMIIT" width={150} height={75} priority style={{ marginBottom: 20 }} />
 
-          <h1 className="text-2xl font-bold text-center mb-6">Welcome Back</h1>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="relative beam-border-circular">
+            {/* Email row */}
+            <div className="block text-sm font-medium leading-6 text-gray-900" style={{ width: '320px' }}>
+              <label htmlFor="email" style={{ display: 'inline-block', width: '120px' }}>
+                Email ID<span style={{ color: 'red' }}>*</span>
+              </label>
               <input
-                type="email"
-                name="email"
-                autoComplete="username"
-                placeholder="Email"
+                id="email"
                 required
+                className="input-1"
+                placeholder="bhawani.sharma@lnmiit.ac.in"
+                type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full pl-4 pr-4 py-3 rounded-md bg-slate-800/70 text-white placeholder-gray-400 focus:outline-none"
+                style={{ display: 'inline-block', width: '200px', height: '36px', marginBottom: '20px' }}
+                autoComplete="username"
               />
             </div>
 
-            <div className="relative beam-border-circular">
+            {/* Password row */}
+            <div className="block text-sm font-medium leading-6 text-gray-900" style={{ width: '320px' }}>
+              <label htmlFor="password" style={{ display: 'inline-block', width: '120px' }}>
+                Password<span style={{ color: 'red' }}>*</span>
+              </label>
               <input
-                type="password"
-                name="password"
-                autoComplete="current-password"
-                placeholder="Password"
+                id="password"
                 required
+                className="input-1"
+                placeholder=""
+                type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-4 pr-4 py-3 rounded-md bg-slate-800/70 text-white placeholder-gray-400 focus:outline-none"
+                style={{ display: 'inline-block', width: '200px', height: '36px', marginBottom: '20px' }}
+                autoComplete="current-password"
               />
             </div>
 
+            {/* Errors */}
             <AnimatePresence>
               {errors.length > 0 && (
                 <motion.div
-                  initial={{ opacity: 0, y: -10 }}
+                  initial={{ opacity: 0, y: -6 }}
                   animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className="bg-red-500/20 text-red-300 border border-red-500/30 rounded-md p-2 text-sm"
+                  exit={{ opacity: 0, y: -6 }}
+                  className="bg-rose-50 text-rose-700 border border-rose-200 rounded-md p-2 text-sm"
+                  style={{ width: '320px' }}
                 >
                   {errors.map((err, idx) => (
-                    <div key={`error-${idx}`}>{err}</div>
+                    <div key={idx}>{err}</div>
                   ))}
                 </motion.div>
               )}
             </AnimatePresence>
 
-            <motion.button
-              type="submit"
-              whileHover={{ scale: 1.03 }}
-              whileTap={{ scale: 0.97 }}
-              disabled={isLoading}
-              className="w-full py-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold transition-all"
-            >
-              {isLoading ? 'Signing In...' : 'Sign In'}
-            </motion.button>
+            {/* Buttons */}
+            <div className="320px" style={{ width: '320px', margin: 'auto' }}>
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="flex w-full justify-center rounded-md bg-gray-800 px-3 py-1.5 text-sm font-semibold leading-6 text-white shadow-sm hover:bg-gray-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-800"
+                style={{ backgroundColor: 'green', border: '2px solid white', margin: '15px 0px 0px', boxShadow: 'green 0px 0px 3px', opacity: 1 }}
+              >
+                {isLoading ? 'Signing In…' : 'Login'}
+              </button>
+            </div>
+            <div className="320px" style={{ width: '320px', margin: 'auto' }}>
+              <button
+                type="button"
+                onClick={() => router.push('/auth/forgot')}
+                className="flex w-full justify-center rounded-md text-sm font-semibold leading-6 text-white shadow-sm"
+                style={{ backgroundColor: 'darkblue', border: '2px solid white', margin: '15px 0px 0px', boxShadow: 'darkblue 0px 0px 3px', opacity: 1, padding: '10px 12px' }}
+              >
+                Forgot Password
+              </button>
+            </div>
           </form>
+        </div>
 
-          <div className="my-6 text-center">
-            <div className="text-slate-500 text-sm mb-2">OR</div>
-            <GoogleLoginButton />
+        <div className="footer">
+          <div style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 8 }}>
+            <div className="exclamation-mark" aria-hidden>
+              <svg aria-hidden="true" focusable="false" data-prefix="fas" data-icon="exclamation" className="svg-inline--fa fa-exclamation" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 512" width="16" height="16">
+                <path fill="currentColor" d="M96 64c0-17.7-14.3-32-32-32S32 46.3 32 64l0 256c0 17.7 14.3 32 32 32s32-14.3 32-32L96 64zM64 480a40 40 0 1 0 0-80 40 40 0 1 0 0 80z" />
+              </svg>
+            </div>
+            KINDLY USE INSTITUTE PROVIDED EMAIL ID WHEN REQUIRED
           </div>
+        </div>
+      </motion.div>
 
-          <p className="mt-4 text-center text-sm text-slate-300">
-            Not a member?{' '}
-            <Link href="/auth/Register" className="text-blue-400 hover:underline">
-              Sign up now
-            </Link>
-          </p>
-        </motion.div>
+      {/* Hidden links to gently prefetch common routes */}
+      <div style={{ display: 'none' }} aria-hidden>
+        <Link href="/" prefetch><span /></Link>
+        <Link href="/Equipments" prefetch><span /></Link>
       </div>
+
+      {/* Forgot password moved to dedicated page /auth/forgot */}
     </>
   );
 };
 
 export default LoginForm;
+
+// FIX: Removed unused helper components TickCooldown and AutoClose

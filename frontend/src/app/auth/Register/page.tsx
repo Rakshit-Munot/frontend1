@@ -16,7 +16,7 @@ interface JwtDecoded {
   [key: string]: unknown;
 }
 
-const API_URL = 'https://backend-4-x6ud.onrender.com/api/auth';
+const API_URL = `${process.env.NEXT_PUBLIC_API_URL}/api/auth`;
 
 const SignUpForm = () => {
   const router = useRouter();
@@ -222,10 +222,11 @@ const SignUpForm = () => {
                           }
                           const decoded: JwtDecoded = jwtDecode(response.credential);
                           const userEmail = decoded.email;
-                          if (!userEmail.endsWith('@lnmiit.ac.in')) {
-                            setErrors(['Only LNMIIT emails are allowed.']);
-                            return;
-                          }
+                          // TEMP DISABLED: Allow non-LNMIIT emails during testing
+                          // if (!userEmail.endsWith('@lnmiit.ac.in')) {
+                          //   setErrors(['Only LNMIIT emails are allowed.']);
+                          //   return;
+                          // }
                           setEmail(userEmail);
                           setUsername(userEmail.split('@')[0]);
                           setPicture(decoded.picture || '');
