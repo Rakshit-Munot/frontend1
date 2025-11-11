@@ -1148,7 +1148,11 @@ export default function InstrumentsPage() {
                         className="flex items-center justify-between gap-3 flex-1 text-left hover:bg-slate-50 rounded-md px-2 py-1 cursor-pointer"
                         onClick={() => {
                           const next = new Set(expandedCategories);
-                          expanded ? next.delete(cat.id) : next.add(cat.id);
+                          if (expanded) {
+                            next.delete(cat.id);
+                          } else {
+                            next.add(cat.id);
+                          }
                           setExpandedCategories(next);
                         }}
                         aria-expanded={expanded}
@@ -1830,6 +1834,8 @@ export default function InstrumentsPage() {
             setRequests((arr) => arr.filter((r) => r.id !== activeAdminReq.id));
             // Also remove from the student modal list if open
             setStudentModalRequests((arr) => arr.filter((r) => r.id !== activeAdminReq.id));
+            // Fast reconcile to restore visible quantities
+            setTimeout(() => { refetchActiveSubcategory(); }, 300);
             const res = await fetch(`${API_URL}/issue-requests/${activeAdminReq.id}/reject`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -1840,6 +1846,9 @@ export default function InstrumentsPage() {
               const data = await res.json().catch(() => ({}));
               // FIX: 'any' to '{ detail?: string }'
               alert((data as { detail?: string }).detail || "Rejection failed");
+            } else {
+              // Follow-up reconcile a bit later in case server-side updates broadcast
+              setTimeout(() => { refetchActiveSubcategory(); }, 1200);
             }
           } finally {
             setRejectSubmitting(false);
@@ -1931,6 +1940,8 @@ export default function InstrumentsPage() {
             setRequests((arr) => arr.filter((r) => !selectedReqIds.has(r.id)));
             // Also remove from the student modal list if open
             setStudentModalRequests((arr) => arr.filter((r) => !selectedReqIds.has(r.id)));
+            // Fast reconcile to restore visible quantities
+            setTimeout(() => { refetchActiveSubcategory(); }, 300);
             const res = await fetch(`${API_URL}/issue-requests/bulk-reject`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -1941,6 +1952,8 @@ export default function InstrumentsPage() {
               const data = await res.json().catch(() => ({}));
               // FIX: 'any' to '{ detail?: string }'
               alert((data as { detail?: string }).detail || "Bulk reject failed");
+            } else {
+              setTimeout(() => { refetchActiveSubcategory(); }, 1200);
             }
           } finally {
             setBulkRejectSubmitting(false);
