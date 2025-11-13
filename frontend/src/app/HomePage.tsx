@@ -4,7 +4,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Head from "next/head";
 import { useAuth } from "./AuthContext";
 import Link from "next/link";
-import Navbar from "./Navbar";
 import Sidebar from "./components/Sidebar";
 import About from "./components/about"; // <-- Import About
 import { useState, useEffect } from "react";
@@ -93,10 +92,7 @@ const HomePage = () => {
       </Head>
       <div className="min-h-screen bg-gradient-to-br from-background via-muted/50 to-background">
 
-        {/* Enhanced Navbar */}
-        <div className="bg-card/50 backdrop-blur-sm border-b border-border/50">
-          <Navbar />
-        </div>
+        {/* TopHeader is rendered globally in layout.tsx; removing legacy Navbar */}
 
         <div className="hero-section relative overflow-hidden py-20">
           <div className="absolute inset-0 bg-gradient-to-r from-primary/20 via-transparent to-secondary/20"></div>

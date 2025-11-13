@@ -28,8 +28,13 @@ export default function InstrumentsPage() {
   const [error, setError] = useState("");
 
   // Requests (admin)
+  const [requestsAll, setRequestsAll] = useState<IssueRequest[]>([]);
+  // Unread indicators for per-request messages
+  const [unreadReqIds, setUnreadReqIds] = useState<Set<number>>(new Set());
+  const [reqLastMsgAt, setReqLastMsgAt] = useState<Record<number, string>>({});
   const [requests, setRequests] = useState<IssueRequest[]>([]);
   const [requestsLoading, setRequestsLoading] = useState(false);
+  const [requestsPrimed, setRequestsPrimed] = useState(false);
   const [reqSearch, setReqSearch] = useState("");
   const [page, setPage] = useState(1);
   // FIX: Removed unused 'processingId' and 'setProcessingId'
@@ -41,14 +46,14 @@ export default function InstrumentsPage() {
   // FIX: Removed unused 'toggleSelectPage'
   const [bulkApproveOpen, setBulkApproveOpen] = useState(false);
   const [bulkRejectOpen, setBulkRejectOpen] = useState(false);
-  const [requestsStatus, setRequestsStatus] = useState<"pending" | "approved" | "rejected" | "all">("pending");
+  const [requestsStatus, setRequestsStatus] = useState<"pending" | "approved" | "submitted" | "rejected" | "all">("pending");
   // FIX: Removed unused 'approveAllPendingOpen'
   // Admin student list sort
   const [studentSort, setStudentSort] = useState<"roll" | "newest">("newest");
   // Admin: student requests modal
   const [studentModalOpen, setStudentModalOpen] = useState(false);
   const [studentModalUser, setStudentModalUser] = useState<{ id: number; name?: string; email?: string } | null>(null);
-  const [studentModalStatus, setStudentModalStatus] = useState<"pending" | "approved" | "rejected" | "all">("pending");
+  const [studentModalStatus, setStudentModalStatus] = useState<"pending" | "approved" | "submitted" | "rejected" | "all">("pending");
   const [studentModalLoading, setStudentModalLoading] = useState(false);
   const [studentModalRequests, setStudentModalRequests] = useState<IssueRequest[]>([]);
 
@@ -58,14 +63,17 @@ export default function InstrumentsPage() {
     setStudentModalOpen(true);
     setStudentModalLoading(true);
     try {
-      const q = requestsStatus === "all" ? "" : `?status=${requestsStatus}`;
-      const url = `${API_URL}/issue-requests/${q}${q ? "&" : "?"}scope=all`;
-      const r = await fetch(url, { credentials: "include" });
-      const d: IssueRequest[] = await r.json();
-      const list = (Array.isArray(d) ? d : []).filter((x) => x.user?.id === user.id || x.user_id === user.id);
+      // Instant derive from cached requestsAll
+      let list = (requestsAll || []).filter((x) => (x.user?.id === user.id) || (x.user_id === user.id));
+      if (requestsStatus === "submitted") {
+        list = list.filter((x) => x.status === "approved" && (x.submission_status === "submitted" || x.submission_status === "not_required"));
+      } else if (requestsStatus === "approved") {
+        list = list.filter((x) => x.status === "approved" && !(x.submission_status === "submitted" || x.submission_status === "not_required"));
+      } else if (requestsStatus !== "all") {
+        list = list.filter((x) => x.status === requestsStatus);
+      }
       setStudentModalRequests(list);
-    } catch {
-      setStudentModalRequests([]);
+      // No background fetch here; sockets keep requestsAll fresh
     } finally {
       setStudentModalLoading(false);
     }
@@ -170,19 +178,40 @@ export default function InstrumentsPage() {
     load();
   }, []);
 
-  // Load pending requests for admin
+  // Load all requests for admin once per status change context; derive UI instantly from local state
   useEffect(() => {
-    if (user?.role === "admin" || user?.role === "faculty") {
-      setRequestsLoading(true);
-      const q = requestsStatus === "all" ? "" : `?status=${requestsStatus}`;
-      const url = `${API_URL}/issue-requests/${q}${q ? "&" : "?"}scope=all`;
-      fetch(url, { credentials: "include" })
-        .then((r) => r.json())
-        .then((d) => setRequests(Array.isArray(d) ? d : []))
-        .catch(() => setRequests([]))
-        .finally(() => setRequestsLoading(false));
+    if (!(user?.role === "admin" || user?.role === "faculty")) return;
+    // If we've already primed the data via initial fetch or sockets, just derive view
+    if (requestsPrimed) {
+      const all = requestsAll;
+      const derived = (() => {
+        if (requestsStatus === "all") return all;
+        if (requestsStatus === "submitted") return all.filter((x) => x.status === "approved" && (x.submission_status === "submitted" || x.submission_status === "not_required"));
+        if (requestsStatus === "approved") return all.filter((x) => x.status === "approved" && !(x.submission_status === "submitted" || x.submission_status === "not_required"));
+        return all.filter((x) => x.status === requestsStatus);
+      })();
+      setRequests(derived);
+      return;
     }
-  }, [user, requestsStatus]);
+    setRequestsLoading(true);
+    const url = `${API_URL}/issue-requests/?scope=all`;
+    fetch(url, { credentials: "include" })
+      .then((r) => r.json())
+      .then((d) => {
+        const all = Array.isArray(d) ? d : [];
+        setRequestsAll(all);
+        setRequestsPrimed(true);
+        const derived = (() => {
+          if (requestsStatus === "all") return all;
+          if (requestsStatus === "submitted") return all.filter((x) => x.status === "approved" && (x.submission_status === "submitted" || x.submission_status === "not_required"));
+          if (requestsStatus === "approved") return all.filter((x) => x.status === "approved" && !(x.submission_status === "submitted" || x.submission_status === "not_required"));
+          return all.filter((x) => x.status === requestsStatus);
+        })();
+        setRequests(derived);
+      })
+      .catch(() => { setRequestsAll([]); setRequests([]); })
+      .finally(() => setRequestsLoading(false));
+  }, [user, requestsStatus, requestsPrimed]);
 
   // Real-time: listen to streams and refetch lists on updates
   const [issueWsTick, setIssueWsTick] = useState(0);
@@ -192,6 +221,8 @@ export default function InstrumentsPage() {
   useEffect(() => { activeSubRef.current = activeSubcategory ?? null; }, [activeSubcategory]);
   const requestsStatusRef = useRef(requestsStatus);
   useEffect(() => { requestsStatusRef.current = requestsStatus; }, [requestsStatus]);
+  const requestsAllRef = useRef<IssueRequest[]>([]);
+  useEffect(() => { requestsAllRef.current = requestsAll; }, [requestsAll]);
 
   useEffect(() => {
     if (!user) return;
@@ -217,26 +248,110 @@ export default function InstrumentsPage() {
     const issueWS = new WebSocket(`${wsBase}/ws/issue-requests/`);
     const instrWS = new WebSocket(`${wsBase}/ws/instruments/`);
 
-    const refetchAdminRequests = () => {
-      const status = requestsStatusRef.current;
-      const q = status === "all" ? "" : `?status=${status}`;
-      const url = `${API_URL}/issue-requests/${q}${q ? "&" : "?"}scope=all`;
-      fetch(url, { credentials: "include" })
-        .then((r) => r.json())
-        .then((d) => setRequests(Array.isArray(d) ? d : []))
-        .catch(() => {});
+    const applyDerived = (all: IssueRequest[]) => {
+      const status = requestsStatusRef.current as "pending" | "approved" | "submitted" | "rejected" | "all";
+      const derived = (() => {
+        if (status === "all") return all;
+        if (status === "submitted") return all.filter((x) => x.status === "approved" && (x.submission_status === "submitted" || x.submission_status === "not_required"));
+        if (status === "approved") return all.filter((x) => x.status === "approved" && !(x.submission_status === "submitted" || x.submission_status === "not_required"));
+        return all.filter((x) => x.status === status);
+      })();
+      setRequests(derived);
     };
-    const refetchStudentPending = () => {
-      fetch(`${API_URL}/issue-requests/?status=pending`, { credentials: "include" })
-        .then((r) => r.json())
-        .then((d) => setMyRequests(Array.isArray(d) ? d : []))
-        .catch(() => {});
-    };
+    // Removed refetchStudentPending; student list updates via WS patches
 
-    issueWS.onmessage = () => {
-      if (user.role === 'admin' || user.role === 'faculty') refetchAdminRequests();
-      if (user.role === 'student') refetchStudentPending();
-      setIssueWsTick((x) => x + 1);
+    issueWS.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data);
+        const event = msg?.event as string | undefined;
+        const payload = msg?.payload as any;
+        if (!event) return;
+        if (user.role === 'student') {
+          if (event === 'issue_request.created') {
+            // If it's mine and pending, prepend
+            if (payload?.user?.id && payload.user.id === (user as any).id) {
+              if (payload?.status === 'pending') setMyRequests((arr) => [payload as IssueRequest, ...arr]);
+            }
+          } else if (event === 'issue_request.updated') {
+            // If it's mine, patch
+            setMyRequests((arr) => arr.map((r) => (r.id === payload?.id ? { ...r, ...payload } as IssueRequest : r)));
+          } else if (event === 'issue_request.message') {
+            const reqId = (payload?.issue_request_id as number) || undefined;
+            const at = (payload?.created_at as string) || undefined;
+            const creatorId = (payload?.creator_id as number) || undefined;
+            if (reqId) {
+              // Only mark unread when the other side sent the message
+              const myId = (user as any)?.id as number | undefined;
+              if (!myId || (creatorId && creatorId !== myId)) {
+                setUnreadReqIds((prev) => new Set(prev).add(reqId));
+                if (at) setReqLastMsgAt((m) => ({ ...m, [reqId]: at }));
+              }
+              // Bubble up a DOM event so modals can append live messages
+              try {
+                if (typeof window !== 'undefined') {
+                  window.dispatchEvent(new CustomEvent('issue-request-message', { detail: payload }));
+                }
+              } catch {}
+            }
+          }
+        }
+
+        if (user.role === 'admin' || user.role === 'faculty') {
+          if (event === 'issue_request.created') {
+            setRequestsAll((all) => {
+              const next = [payload as IssueRequest, ...all];
+              applyDerived(next);
+              return next;
+            });
+          } else if (event === 'issue_request.updated') {
+            setRequestsAll((all) => {
+              const next = all.map((r) => (r.id === payload?.id ? { ...r, ...payload } as IssueRequest : r));
+              applyDerived(next);
+              return next;
+            });
+          } else if (event === 'issue_request.rejected') {
+            const id = payload?.id as number | undefined;
+            if (id) {
+              setRequestsAll((all) => {
+                const next = all.map((r) => (r.id === id ? { ...r, status: 'rejected' } : r));
+                applyDerived(next);
+                return next;
+              });
+            }
+          // Ignore 'approved' and 'bulk_approved' noisy events; rely on 'updated' for consistency
+          } else if (event === 'issue_request.bulk_rejected') {
+            const ids = (payload?.ids as number[]) || [];
+            if (ids.length) {
+              setRequestsAll((all) => {
+                const next = all.map((r) => (ids.includes(r.id) ? { ...r, status: 'rejected' } : r));
+                applyDerived(next);
+                return next;
+              });
+            }
+          } else if (event === 'issue_request.message') {
+            const reqId = (payload?.issue_request_id as number) || undefined;
+            const at = (payload?.created_at as string) || undefined;
+            const creatorId = (payload?.creator_id as number) || undefined;
+            if (reqId) {
+              const myId = (user as any)?.id as number | undefined;
+              if (!myId || (creatorId && creatorId !== myId)) {
+                setUnreadReqIds((prev) => new Set(prev).add(reqId));
+                if (at) setReqLastMsgAt((m) => ({ ...m, [reqId]: at }));
+              }
+              // Bubble up a DOM event so modals can append live messages
+              try {
+                if (typeof window !== 'undefined') {
+                  window.dispatchEvent(new CustomEvent('issue-request-message', { detail: payload }));
+                }
+              } catch {}
+            }
+          }
+        }
+      } catch {
+        // Fallback: no-op on bad WS message
+      } finally {
+        // No wsTick increments; avoid triggering redundant GETs in student view
+      }
     };
 
     instrWS.onmessage = (ev) => {
@@ -293,11 +408,29 @@ export default function InstrumentsPage() {
   useEffect(() => {
     if (user?.role === "student") {
       setMyReqLoading(true);
-      fetch(`${API_URL}/issue-requests/?status=pending`, { credentials: "include" })
-        .then((r) => r.json())
-        .then((d) => setMyRequests(Array.isArray(d) ? d : []))
-        .catch(() => setMyRequests([]))
-        .finally(() => setMyReqLoading(false));
+      (async () => {
+        try {
+          const urls = [
+            `${API_URL}/issue-requests/?status=pending`,
+            `${API_URL}/issue-requests/?status=approved`,
+            `${API_URL}/issue-requests/?status=rejected`,
+          ];
+          const resps = await Promise.all(urls.map((u) => fetch(u, { credentials: "include" }).catch(() => null)));
+          const jsons = await Promise.all(resps.map((r) => (r && r.ok ? r.json() : Promise.resolve([]))));
+          const combinedMap = new Map<number, IssueRequest>();
+          for (const arr of jsons) {
+            if (!Array.isArray(arr)) continue;
+            for (const it of arr as IssueRequest[]) {
+              combinedMap.set(it.id, it);
+            }
+          }
+          setMyRequests(Array.from(combinedMap.values()));
+        } catch {
+          setMyRequests([]);
+        } finally {
+          setMyReqLoading(false);
+        }
+      })();
     }
   }, [user]);
 
@@ -343,24 +476,56 @@ export default function InstrumentsPage() {
 
   // Admin/Faculty: group requests by student for display
   const groupedStudents = useMemo(() => {
-    const map = new Map<number, { id: number; name?: string; email?: string; count: number; newestAt?: string; lastRemark?: string; lastApprovedAt?: string; lastReturnBy?: string | null }>();
-    for (const r of requests) {
-      const id = (r.user?.id as number | undefined) ?? (r.user_id as number | undefined);
-      if (!id) continue;
-      const name = r.user?.name;
-      const email = r.user?.email;
-      if (!map.has(id)) map.set(id, { id, name, email, count: 0, newestAt: r.created_at, lastRemark: r.remarks, lastApprovedAt: r.approved_at || undefined, lastReturnBy: r.return_by ?? null });
-      const entry = map.get(id)!;
-      entry.name = entry.name ?? name;
-      entry.email = entry.email ?? email;
-      entry.count += 1;
-      // track newest created_at
-      if (!entry.newestAt || (r.created_at && r.created_at > entry.newestAt)) entry.newestAt = r.created_at;
-      // keep latest remark/approved/return_by by created_at order (newest overrides)
-      if (r.created_at && entry.newestAt && r.created_at >= entry.newestAt) {
-        entry.lastRemark = r.remarks ?? entry.lastRemark;
-        if (r.approved_at) entry.lastApprovedAt = r.approved_at;
-        if (typeof r.return_by !== 'undefined') entry.lastReturnBy = r.return_by ?? null;
+    const map = new Map<number, { id: number; name?: string; email?: string; count: number; newestAt?: string; lastRemark?: string; lastApprovedAt?: string; lastReturnBy?: string | null; hasUnread?: boolean; unreadCount?: number }>();
+    // When viewing Submitted: include a student only if ALL their approved requests are submitted
+    if (requestsStatus === "submitted") {
+      const byStudent: Record<number, IssueRequest[]> = {};
+      for (const r of requests) {
+        if (r.status !== "approved") continue; // we fetched approved here
+        const sid = (r.user?.id as number | undefined) ?? (r.user_id as number | undefined);
+        if (!sid) continue;
+        (byStudent[sid] ||= []).push(r);
+      }
+      for (const [sidStr, arr] of Object.entries(byStudent)) {
+        const sid = Number(sidStr);
+        const allSubmitted = arr.every((x) => x.submission_status === "submitted" || x.submission_status === "not_required");
+        if (!allSubmitted) continue; // skip student until everything submitted
+        const submittedOnly = arr.filter((x) => x.submission_status === "submitted" || x.submission_status === "not_required");
+        if (submittedOnly.length === 0) continue;
+        const base = submittedOnly[0];
+        const name = base.user?.name;
+        const email = base.user?.email;
+        const entry = { id: sid, name, email, count: submittedOnly.length, newestAt: base.created_at, lastRemark: base.remarks, lastApprovedAt: base.approved_at || undefined, lastReturnBy: base.return_by ?? null };
+        // refine newest and meta by latest created_at in submittedOnly
+        for (const r of submittedOnly) {
+          if (!entry.newestAt || (r.created_at && r.created_at > entry.newestAt)) entry.newestAt = r.created_at;
+          if (r.approved_at && entry.newestAt && r.created_at >= entry.newestAt) entry.lastApprovedAt = r.approved_at;
+          if (typeof r.return_by !== 'undefined' && entry.newestAt && r.created_at >= entry.newestAt) entry.lastReturnBy = r.return_by ?? null;
+          if (r.remarks && entry.newestAt && r.created_at >= entry.newestAt) entry.lastRemark = r.remarks;
+        }
+        map.set(sid, entry);
+      }
+    } else {
+      for (const r of requests) {
+        const id = (r.user?.id as number | undefined) ?? (r.user_id as number | undefined);
+        if (!id) continue;
+        const name = r.user?.name;
+        const email = r.user?.email;
+        if (!map.has(id)) map.set(id, { id, name, email, count: 0, newestAt: r.created_at, lastRemark: r.remarks, lastApprovedAt: r.approved_at || undefined, lastReturnBy: r.return_by ?? null, hasUnread: false, unreadCount: 0 });
+        const entry = map.get(id)!;
+        entry.name = entry.name ?? name;
+        entry.email = entry.email ?? email;
+        entry.count += 1;
+        if (!entry.newestAt || (r.created_at && r.created_at > entry.newestAt)) entry.newestAt = r.created_at;
+        if (r.created_at && entry.newestAt && r.created_at >= entry.newestAt) {
+          entry.lastRemark = r.remarks ?? entry.lastRemark;
+          if (r.approved_at) entry.lastApprovedAt = r.approved_at;
+          if (typeof r.return_by !== 'undefined') entry.lastReturnBy = r.return_by ?? null;
+        }
+        if (unreadReqIds.has(r.id)) {
+          entry.hasUnread = true;
+          entry.unreadCount = (entry.unreadCount || 0) + 1;
+        }
       }
     }
     // FIX: Changed 'let' to 'const'
@@ -371,7 +536,7 @@ export default function InstrumentsPage() {
       arr.sort((a, b) => (b.newestAt || "").localeCompare(a.newestAt || ""));
     }
     return arr;
-  }, [requests, studentSort]);
+  }, [requests, studentSort, unreadReqIds]);
 
   // Filter students by roll/email
   const filteredStudents = groupedStudents.filter((s) => {
@@ -1555,7 +1720,13 @@ export default function InstrumentsPage() {
 
           {/* Student: My Requests with tabs */}
           {role === "student" && (
-            <StudentMyRequests wsTick={issueWsTick} optItems={myRequests} optLoading={myReqLoading} />
+            <StudentMyRequests
+              wsTick={issueWsTick}
+              optItems={myRequests}
+              optLoading={myReqLoading}
+              unreadIds={unreadReqIds}
+              onOpenThread={(reqId) => setUnreadReqIds((prev) => { const n = new Set(prev); n.delete(reqId); return n; })}
+            />
           )}
 
           {/* Admin/Faculty: Requests (grouped by student) */}
@@ -1605,9 +1776,9 @@ export default function InstrumentsPage() {
                 </div>
               </div>
 
-              {/* Status tabs: pending/approved/rejected/all */}
+              {/* Status tabs: pending/approved/submitted/rejected/all */}
               <div className="mb-3">
-                {(["pending","approved","rejected","all"] as const).map((t) => (
+                {(["pending","approved","submitted","rejected","all"] as const).map((t) => (
                   <button
                     key={t}
                     onClick={() => { setRequestsStatus(t); setPage(1); }}
@@ -1635,14 +1806,17 @@ export default function InstrumentsPage() {
               {requestsLoading ? (
                 <div className="py-10 text-center text-slate-500">Loading…</div>
               ) : filteredStudents.length === 0 ? (
-                <div className="py-10 text-center text-slate-500">No pending requests</div>
+                <div className="py-10 text-center text-slate-500">No {requestsStatus} requests</div>
               ) : (
                 <div className="space-y-3">
                   {paginatedStudents.map((stu) => (
                     <div key={stu.id} className="rounded-lg border p-3 hover:bg-slate-50 cursor-pointer" onClick={() => openStudentRequests({ id: stu.id, name: stu.name, email: stu.email })}>
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="text-sm font-semibold text-slate-800 truncate">Roll No.: {stu.name || `User ${stu.id}`}</div>
+                          <div className="text-sm font-semibold text-slate-800 truncate flex items-center gap-2">
+                            <span>Roll No.: {stu.name || `User ${stu.id}`}</span>
+                            {stu.hasUnread ? <span className="inline-block w-2 h-2 rounded-full bg-indigo-600" title={`${stu.unreadCount || 1} unread`}></span> : null}
+                          </div>
                           {stu.email && (
                             <div className="text-xs"><a className="text-indigo-600 hover:underline" href={`mailto:${stu.email}`} onClick={(e) => e.stopPropagation()}>{stu.email}</a></div>
                           )}
@@ -1787,14 +1961,54 @@ export default function InstrumentsPage() {
         // FIX: 'any' to 'unknown' with type guards
         request={activeAdminReq ? { id: activeAdminReq.id, itemName: (typeof activeAdminReq.item === "object" && (activeAdminReq.item as { name?: string })?.name) ? (activeAdminReq.item as { name: string }).name : String(activeAdminReq.item), quantity: activeAdminReq.quantity } : null}
         onClose={() => setApproveOpen(false)}
-        onApprove={async ({ returnDays, returnDate, remark }) => {
+        onApprove={async ({ returnDays, returnDate, remark, markSubmitted }) => {
           if (!activeAdminReq) return;
-          setApproveSubmitting(true);
           try {
             // Optimistic remove from list
             setRequests((arr) => arr.filter((r) => r.id !== activeAdminReq.id));
             // Also remove from the student modal list if open
             setStudentModalRequests((arr) => arr.filter((r) => r.id !== activeAdminReq.id));
+            // Optimistically update master cache: mark as approved (and optionally submitted)
+            const nowIso = new Date().toISOString();
+            const computeReturnBy = () => {
+              if (returnDate) return returnDate;
+              const days = returnDays && Number.isFinite(returnDays) ? Number(returnDays) : 7;
+              const dt = new Date();
+              dt.setDate(dt.getDate() + days);
+              return dt.toISOString();
+            };
+            const rbIso = computeReturnBy();
+            let nextAll: IssueRequest[] = [];
+            setRequestsAll((arr) => {
+              nextAll = arr.map((r) => r.id === activeAdminReq.id ? {
+                ...r,
+                status: "approved",
+                approved_at: nowIso,
+                return_by: rbIso,
+                remarks: markSubmitted
+                  ? (() => {
+                      try {
+                        const ist = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false });
+                        return `Submitted on ${ist} IST`;
+                      } catch { return r.remarks; }
+                    })()
+                  : (remark ?? r.remarks),
+                submission_status: markSubmitted ? "submitted" : (r.submission_status ?? "pending"),
+                submitted_at: markSubmitted ? nowIso : r.submitted_at,
+              } : r);
+              return nextAll;
+            });
+            // Re-derive current tab instantly from nextAll
+            {
+              const all = nextAll;
+              const derived = (() => {
+                if (requestsStatus === "all") return all;
+                if (requestsStatus === "submitted") return all.filter((x) => x.status === "approved" && (x.submission_status === "submitted" || x.submission_status === "not_required"));
+                if (requestsStatus === "approved") return all.filter((x) => x.status === "approved" && !(x.submission_status === "submitted" || x.submission_status === "not_required"));
+                return all.filter((x) => x.status === requestsStatus);
+              })();
+              setRequests(derived);
+            }
             // FIX: 'any' to 'Record<string, unknown>'
             const body: Record<string, unknown> = { remarks: remark || undefined };
             if (returnDays != null) body.return_days = returnDays;
@@ -1812,13 +2026,28 @@ export default function InstrumentsPage() {
             } else {
               setTimeout(() => { refetchActiveSubcategory(); }, 1500);
             }
+            // Fire-and-forget mark submitted if requested; revert optimistically if it fails
+            if (markSubmitted) {
+              fetch(`${API_URL}/issue-requests/${activeAdminReq.id}/submit`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                // Let backend produce IST-formatted default remark
+                body: JSON.stringify({ notify_email: true }),
+              }).then((r) => {
+                if (!r.ok) throw new Error("submit.failed");
+              }).catch(() => {
+                // Don't revert immediately; consumables auto-submit on approval and may 409/400 here.
+                setSuccessMessage("Failed to mark submitted — will recheck");
+                setTimeout(() => { refetchActiveSubcategory(); }, 1200);
+              });
+            }
           } finally {
-            setApproveSubmitting(false);
             setApproveOpen(false);
             setActiveAdminReq(null);
           }
         }}
-        isBusy={approveSubmitting}
+        isBusy={false}
       />
 
       <AdminRejectModal
@@ -1866,18 +2095,20 @@ export default function InstrumentsPage() {
         requests={studentModalRequests}
         loading={studentModalLoading}
         status={studentModalStatus}
+        unreadIds={unreadReqIds}
+        lastMsgAt={reqLastMsgAt}
         onChangeStatus={async (s) => {
           setStudentModalStatus(s);
           if (!studentModalUser) return;
           setStudentModalLoading(true);
           try {
-            const q = s === "all" ? "" : `?status=${s}`;
-            const r = await fetch(`${API_URL}/issue-requests/${q}${q ? "&" : "?"}scope=all`, { credentials: "include" });
-            const d: IssueRequest[] = await r.json();
-            const list = (Array.isArray(d) ? d : []).filter((x) => x.user?.id === studentModalUser.id || x.user_id === studentModalUser.id);
+            // Instant derive from requestsAll
+            let list = (requestsAll || []).filter((x) => x.user?.id === studentModalUser.id || x.user_id === studentModalUser.id);
+            if (s === "submitted") list = list.filter((x) => x.status === "approved" && (x.submission_status === "submitted" || x.submission_status === "not_required"));
+            else if (s === "approved") list = list.filter((x) => x.status === "approved" && !(x.submission_status === "submitted" || x.submission_status === "not_required"));
+            else if (s !== "all") list = list.filter((x) => x.status === s);
             setStudentModalRequests(list);
-          } catch {
-            setStudentModalRequests([]);
+            // No background fetch; rely on socket updates
           } finally {
             setStudentModalLoading(false);
           }
@@ -1892,6 +2123,30 @@ export default function InstrumentsPage() {
         onRejectAll={(ids) => {
           setSelectedReqIds(new Set((ids || []).filter(Boolean)));
           setTimeout(() => setBulkRejectOpen(true), 0);
+        }}
+        onOpenThread={(reqId) => setUnreadReqIds((prev) => { const n = new Set(prev); n.delete(reqId); return n; })}
+        onMarkSubmitted={(ids) => {
+          if (!Array.isArray(ids) || ids.length === 0) return;
+          // Optimistically mark submitted in the student modal list
+          setStudentModalRequests((arr) => arr.map((r) => ids.includes(r.id) ? {
+            ...r,
+            submission_status: "submitted",
+            submitted_at: new Date().toISOString(),
+            remarks: (() => { try { const ist = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false }); return `Submitted on ${ist} IST`; } catch { return r.remarks; } })(),
+          } : r));
+          // Also reflect immediately in the global admin requests list for grouping
+          setRequestsAll((arr) => arr.map((r) => ids.includes(r.id) ? {
+            ...r,
+            submission_status: "submitted",
+            submitted_at: new Date().toISOString(),
+            remarks: (() => { try { const ist = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false }); return `Submitted on ${ist} IST`; } catch { return r.remarks; } })(),
+          } : r));
+          setRequests((arr) => arr.map((r) => ids.includes(r.id) ? {
+            ...r,
+            submission_status: "submitted",
+            submitted_at: new Date().toISOString(),
+            remarks: (() => { try { const ist = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false }); return `Submitted on ${ist} IST`; } catch { return r.remarks; } })(),
+          } : r));
         }}
       />
 
@@ -1967,42 +2222,103 @@ export default function InstrumentsPage() {
   );
 }
 
-function StudentMyRequests({ wsTick, optItems, optLoading }: { wsTick: number; optItems?: IssueRequest[]; optLoading?: boolean }) {
-  const [tab, setTab] = useState<"pending" | "approved" | "rejected">("pending");
+function StudentMyRequests({ wsTick, optItems, optLoading, unreadIds, onOpenThread }: { wsTick: number; optItems?: IssueRequest[]; optLoading?: boolean; unreadIds?: Set<number>; onOpenThread?: (reqId: number) => void }) {
+  const [tab, setTab] = useState<"pending" | "approved" | "submitted" | "rejected">("pending");
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState<IssueRequest[]>([]);
   const [page, setPage] = useState(1);
+  const [sortOpt, setSortOpt] = useState<"newest" | "oldest">("newest");
+  const [msgOpenFor, setMsgOpenFor] = useState<number | null>(null);
+  const [msgLoading, setMsgLoading] = useState(false);
+  const [thread, setThread] = useState<Array<{ id: number; text: string; created_at: string; sender?: string }>>([]);
   const API_URL = `${process.env.NEXT_PUBLIC_API_URL}/instruments`;
 
   useEffect(() => {
-    // FIX: Moved 'load' function inside useEffect to fix exhaustive-deps
-    const load = async (status: "pending" | "approved" | "rejected") => {
+    // Socket-first derivation: if optItems provided, derive per tab without fetching
+    if (Array.isArray(optItems)) {
+      let arr = optItems.slice();
+      if (tab === "submitted") {
+        arr = arr.filter((x) => x.status === "approved" && (x.submission_status === "submitted" || x.submission_status === "not_required"));
+      } else if (tab === "approved") {
+        arr = arr.filter((x) => x.status === "approved" && !(x.submission_status === "submitted" || x.submission_status === "not_required"));
+      } else {
+        arr = arr.filter((x) => x.status === tab);
+      }
+      setItems(arr);
+      setLoading(false);
+      setPage(1);
+      return;
+    }
+    // Fallback fetch only if no optItems available
+    (async () => {
       setLoading(true);
       try {
-        const r = await fetch(`${API_URL}/issue-requests/?status=${status}`, { credentials: "include" });
+        const statusToFetch = tab === "submitted" ? "approved" : tab;
+        const r = await fetch(`${API_URL}/issue-requests/?status=${statusToFetch}`, { credentials: "include" });
         const d = await r.json();
-        setItems(Array.isArray(d) ? d : []);
+        let arr = Array.isArray(d) ? d : [];
+        if (tab === "submitted") {
+          arr = arr.filter((x: IssueRequest) => x.status === "approved" && (x.submission_status === "submitted" || x.submission_status === "not_required"));
+        } else if (tab === "approved") {
+          arr = arr.filter((x: IssueRequest) => x.status === "approved" && !(x.submission_status === "submitted" || x.submission_status === "not_required"));
+        }
+        setItems(arr);
       } catch {
         setItems([]);
       } finally {
         setLoading(false);
+        setPage(1);
       }
-    };
+    })();
+  }, [tab, wsTick, API_URL, optItems]);
 
-    load(tab);
-    setPage(1);
-  }, [tab, wsTick, API_URL]); // Added API_URL as it's a dependency
+  const finalItems = items;
+  const finalLoading = optItems ? false : loading || (tab === "pending" && !!optLoading);
 
-  const showOptimistic = tab === "pending" && Array.isArray(optItems) && (optItems?.length || 0) > (items?.length || 0);
-  const finalItems = showOptimistic ? (optItems as IssueRequest[]) : items;
-  const finalLoading = tab === "pending" && optLoading ? true : loading;
+  // Apply sorting for Approved/Submitted/Rejected
+  const itemsSorted = (() => {
+    if (tab === "approved") {
+      const key = (r: IssueRequest) => r.approved_at || r.created_at || "";
+      return finalItems.slice().sort((a, b) => sortOpt === "newest" ? (key(b) || "").localeCompare(key(a) || "") : (key(a) || "").localeCompare(key(b) || ""));
+    }
+    if (tab === "submitted") {
+      const key = (r: IssueRequest) => r.submitted_at || r.created_at || "";
+      return finalItems.slice().sort((a, b) => sortOpt === "newest" ? (key(b) || "").localeCompare(key(a) || "") : (key(a) || "").localeCompare(key(b) || ""));
+    }
+    if (tab === "rejected") {
+      const key = (r: IssueRequest) => r.created_at || "";
+      return finalItems.slice().sort((a, b) => sortOpt === "newest" ? (key(b) || "").localeCompare(key(a) || "") : (key(a) || "").localeCompare(key(b) || ""));
+    }
+    return finalItems;
+  })();
 
   const pageSize = PAGE_SIZE;
-  const totalPages = Math.ceil(finalItems.length / pageSize) || 1;
+  const totalPages = Math.ceil(itemsSorted.length / pageSize) || 1;
   const pageLocal = Math.min(page, totalPages);
-  const paged = finalItems.slice((pageLocal - 1) * pageSize, pageLocal * pageSize);
+  const paged = itemsSorted.slice((pageLocal - 1) * pageSize, pageLocal * pageSize);
+
+  // Live-append new messages from socket when thread is open
+  useEffect(() => {
+    const handler = (e: Event) => {
+      try {
+        const detail = (e as CustomEvent).detail as any;
+        const reqId = detail?.issue_request_id as number | undefined;
+        if (!reqId || reqId !== msgOpenFor) return;
+        const text = (detail?.text as string) || "";
+        const id = (detail?.id as number) || Math.floor(Math.random() * 1e9);
+        const created_at = (detail?.created_at as string) || new Date().toISOString();
+        const sender = detail?.msg_type === 'system' ? 'System' : (detail?.sender || 'Admin');
+        setThread((arr) => [...arr, { id, text, created_at, sender }]);
+      } catch {}
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('issue-request-message', handler as EventListener);
+      return () => window.removeEventListener('issue-request-message', handler as EventListener);
+    }
+  }, [msgOpenFor]);
 
   return (
+    <>
     <div className="rounded-2xl border bg-white p-4 sm:p-5 shadow-sm">
       <div className="flex items-center justify-between gap-3 mb-3">
         <div className="flex items-center gap-2">
@@ -2015,13 +2331,22 @@ function StudentMyRequests({ wsTick, optItems, optLoading }: { wsTick: number; o
           )}
         </div>
         <div className="flex gap-2">
-          {(["pending", "approved", "rejected"] as const).map((t) => (
+          {(["pending", "approved", "submitted", "rejected"] as const).map((t) => (
             <button key={t} className={`text-xs px-3 py-1.5 rounded-md border ${tab === t ? "bg-indigo-50 border-indigo-400" : "hover:bg-slate-50"} cursor-pointer`} onClick={() => setTab(t)}>
               {t[0].toUpperCase() + t.slice(1)}
             </button>
           ))}
         </div>
       </div>
+      {(tab === "approved" || tab === "submitted" || tab === "rejected") && (
+        <div className="mb-2 flex items-center gap-2 text-xs">
+          <span className="text-slate-600">Sort:</span>
+          <select className="rounded border px-2 py-1 bg-white" value={sortOpt} onChange={(e) => setSortOpt(e.target.value as any)}>
+            <option value="newest">Newest</option>
+            <option value="oldest">Oldest</option>
+          </select>
+        </div>
+      )}
       {finalLoading ? (
         <div className="py-10 text-center text-slate-500">Loading…</div>
       ) : finalItems.length === 0 ? (
@@ -2069,6 +2394,30 @@ function StudentMyRequests({ wsTick, optItems, optLoading }: { wsTick: number; o
                     )}
                   </div>
                 </div>
+                <div className="mt-2">
+                  <button
+                    className="rounded-md border dialog-divider-login px-2 py-1 text-xs hover:bg-slate-50 cursor-pointer"
+                    onClick={async () => {
+                      setMsgOpenFor(req.id);
+                      setMsgLoading(true);
+                      try {
+                        const r = await fetch(`${API_URL}/issue-requests/${req.id}/messages`, { credentials: "include" });
+                        const d = await r.json();
+                        setThread(Array.isArray(d) ? d : []);
+                      } catch {
+                        setThread([]);
+                      } finally {
+                        setMsgLoading(false);
+                        if (onOpenThread) onOpenThread(req.id);
+                      }
+                    }}
+                  >
+                    Messages
+                    {unreadIds?.has(req.id) && (
+                      <span className="ml-1 inline-block w-2 h-2 rounded-full bg-indigo-600 align-middle" />
+                    )}
+                  </button>
+                </div>
               </div>
             );})}
         </div>
@@ -2085,5 +2434,33 @@ function StudentMyRequests({ wsTick, optItems, optLoading }: { wsTick: number; o
         </div>
       )}
     </div>
+    {msgOpenFor != null && (
+      <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40">
+        <div className="dialog-surface-login w-full max-w-lg p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-lg font-semibold text-slate-800">Messages</div>
+            <button className="rounded-md border dialog-divider-login px-2 py-1 text-slate-600 hover:bg-slate-50 cursor-pointer" onClick={() => { setMsgOpenFor(null); setThread([]); }}>✕</button>
+          </div>
+          {msgLoading ? (
+            <div className="py-8 text-center text-slate-500 text-sm">Loading…</div>
+          ) : thread.length === 0 ? (
+            <div className="py-8 text-center text-slate-500 text-sm">No messages</div>
+          ) : (
+            <div className="space-y-2 max-h-[50vh] overflow-y-auto">
+              {thread.map((m) => (
+                <div key={m.id} className="rounded-md border dialog-divider-login p-2">
+                  <div className="text-xs text-slate-500 flex items-center justify-between">
+                    <span>{m.sender || "System"}</span>
+                    <span>{new Date(m.created_at).toLocaleString()}</span>
+                  </div>
+                  <div className="text-sm text-slate-800 mt-1 whitespace-pre-wrap">{m.text}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    )}
+    </>
   );
 }

@@ -14,6 +14,18 @@ export default function DashPage() {
 		);
 	}
 
+	// Restrict Bills to admin only
+	if (user?.role !== "admin") {
+		return (
+			<div className="min-h-screen grid place-items-center bg-white">
+				<div className="dialog-surface-login max-w-md w-full p-6 text-center">
+					<h2 className="text-xl font-semibold text-slate-800">Access restricted</h2>
+					<p className="text-slate-600 mt-2">Only admins can view the Bills dashboard.</p>
+				</div>
+			</div>
+		);
+	}
+
 	return (
 		<div className="min-h-screen bg-white">
 			<div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">

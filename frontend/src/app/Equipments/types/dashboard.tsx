@@ -33,7 +33,11 @@ export interface IssueRequest {
   quantity: number
   status: string
   created_at: string
+  approved_at?: string
+  return_by?: string
   remarks?: string
+  submission_status?: "not_required" | "pending" | "submitted"
+  submitted_at?: string
 }
 
 export type UserRole = "admin" | "faculty" | "staff" | "student" | "guest"

@@ -1,8 +1,9 @@
-import React, { useState } from "react"
-import { Clock, Search, CheckCircle, XCircle, ChevronLeft, ChevronRight } from "lucide-react"
+import React, { useEffect, useMemo, useState } from "react"
+import { Clock, Search, CheckCircle, XCircle, ChevronLeft, ChevronRight, MessageSquare, Calendar, ChevronDown } from "lucide-react"
 import type { IssueRequest } from "../types/dashboard"
 import { formatUserDisplayName, getItemName } from "../utils/dashboardUtils"
 import { API_URL } from "../constants/dashboard"
+import { getItem, postIssueMessage, submitReturn, type ItemDetailSnapshot, type IssueMessage } from "../services/instrumentsApi"
 
 interface AdminRequestsProps {
   requests: IssueRequest[]
@@ -30,22 +31,61 @@ export const AdminRequests: React.FC<AdminRequestsProps> = ({
   onRemoveRequest,
 }) => {
   const [processingId, setProcessingId] = useState<number | null>(null)
+  const [showApproveModal, setShowApproveModal] = useState(false)
+  const [showMessageModal, setShowMessageModal] = useState(false)
+  const [activeReq, setActiveReq] = useState<IssueRequest | null>(null)
+  const [activeItem, setActiveItem] = useState<ItemDetailSnapshot | null>(null)
+  const [approveForm, setApproveForm] = useState({
+    returnDays: 7 as number,
+    returnBy: "" as string,
+    remarks: "" as string,
+    markSubmitted: false as boolean,
+  })
+  const [messageForm, setMessageForm] = useState({ text: "", notify: true })
 
-  const handleApprove = async (requestId: number) => {
+  const openApprove = async (req: IssueRequest) => {
+    setActiveReq(req)
+    setShowApproveModal(true)
+    try {
+      const item = await getItem(typeof req.item === "number" ? req.item : req.item.id)
+      setActiveItem(item)
+      // Default: for non-consumables, do not mark submitted immediately
+      setApproveForm((f) => ({ ...f, markSubmitted: false }))
+    } catch {
+      setActiveItem(null)
+    }
+  }
+
+  const confirmApprove = async () => {
+    if (!activeReq) return
+    const requestId = activeReq.id
     setProcessingId(requestId)
     try {
+      const body: any = {}
+      if (approveForm.remarks) body.remarks = approveForm.remarks
+      if (approveForm.returnBy) body.return_by = new Date(approveForm.returnBy).toISOString()
+      else if (approveForm.returnDays) body.return_days = approveForm.returnDays
       const res = await fetch(`${API_URL}/issue-requests/${requestId}/approve`, {
         method: "POST",
         credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
       })
-      if (res.ok) {
-        onRemoveRequest(requestId)
-      } else {
+      if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        alert(data.detail || "Approval failed.")
+        throw new Error(data.detail || "Approval failed.")
       }
-    } catch (error) {
-      alert("Failed to approve request.")
+      // Optionally mark submitted (only relevant for non-consumables)
+      if (approveForm.markSubmitted) {
+        try {
+          await submitReturn(requestId, { message: "Submitted at approval", notify_email: true })
+        } catch {}
+      }
+      onRemoveRequest(requestId)
+      setShowApproveModal(false)
+      setActiveReq(null)
+    } catch (e: any) {
+      alert(e?.message || "Failed to approve request.")
     } finally {
       setProcessingId(null)
     }
@@ -61,6 +101,26 @@ export const AdminRequests: React.FC<AdminRequestsProps> = ({
       onRemoveRequest(requestId)
     } catch (error) {
       alert("Failed to reject request.")
+    } finally {
+      setProcessingId(null)
+    }
+  }
+
+  const openMessage = (req: IssueRequest) => {
+    setActiveReq(req)
+    setMessageForm({ text: "", notify: true })
+    setShowMessageModal(true)
+  }
+
+  const sendMessage = async () => {
+    if (!activeReq) return
+    setProcessingId(activeReq.id)
+    try {
+      await postIssueMessage(activeReq.id, { text: messageForm.text, notify_email: messageForm.notify })
+      setShowMessageModal(false)
+      setActiveReq(null)
+    } catch {
+      alert("Failed to send message")
     } finally {
       setProcessingId(null)
     }
@@ -144,6 +204,13 @@ export const AdminRequests: React.FC<AdminRequestsProps> = ({
                         {req.quantity}
                       </span>
                     </div>
+
+                    {activeItem && activeReq?.id === req.id ? (
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-400 text-sm">Type:</span>
+                        <span className="text-gray-300 text-sm">{activeItem.is_consumable ? "Consumed" : "Not Consumed"}</span>
+                      </div>
+                    ) : null}
                   </div>
 
                   {/* Action buttons */}
@@ -151,7 +218,8 @@ export const AdminRequests: React.FC<AdminRequestsProps> = ({
                     <button
                       className="flex-1 bg-emerald-600 text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                       disabled={processingId === req.id}
-                      onClick={() => handleApprove(req.id)}
+                      onClick={() => openApprove(req)}
+                      title="Approve and set return window; choose submission"
                     >
                       <CheckCircle className="w-4 h-4" />
                       Approve
@@ -163,6 +231,15 @@ export const AdminRequests: React.FC<AdminRequestsProps> = ({
                     >
                       <XCircle className="w-4 h-4" />
                       Reject
+                    </button>
+                    <button
+                      className="flex-1 bg-slate-700 text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-slate-600 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                      disabled={processingId === req.id}
+                      onClick={() => openMessage(req)}
+                      title="Send message (optional email)"
+                    >
+                      <MessageSquare className="w-4 h-4" />
+                      Message
                     </button>
                   </div>
                 </div>
@@ -195,6 +272,130 @@ export const AdminRequests: React.FC<AdminRequestsProps> = ({
           </>
         )}
       </div>
+
+      {/* Approve Modal */}
+      {showApproveModal && activeReq && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-lg bg-slate-900 border border-white/10 rounded-xl p-6 shadow-2xl">
+            <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+              <CheckCircle className="w-5 h-5 text-emerald-400" />
+              Approve Request
+            </h3>
+            <div className="space-y-4">
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">Item</span>
+                <span className="text-gray-200">{getItemName(activeReq.item)}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">Type</span>
+                <span className="text-gray-200">{activeItem?.is_consumable ? "Consumed" : "Not Consumed"}</span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Return in (days)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={approveForm.returnDays}
+                    onChange={(e) => setApproveForm((f) => ({ ...f, returnDays: Math.max(1, Number(e.target.value) || 1), returnBy: "" }))}
+                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-md text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Or return by (date)</label>
+                  <input
+                    type="datetime-local"
+                    value={approveForm.returnBy}
+                    onChange={(e) => setApproveForm((f) => ({ ...f, returnBy: e.target.value, returnDays: f.returnDays }))}
+                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-md text-white"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Remarks (optional)</label>
+                <textarea
+                  value={approveForm.remarks}
+                  onChange={(e) => setApproveForm((f) => ({ ...f, remarks: e.target.value }))}
+                  className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-md text-white min-h-[80px]"
+                />
+              </div>
+
+              {!activeItem?.is_consumable && (
+                <label className="flex items-center gap-2 text-sm text-gray-200">
+                  <input
+                    type="checkbox"
+                    checked={approveForm.markSubmitted}
+                    onChange={(e) => setApproveForm((f) => ({ ...f, markSubmitted: e.target.checked }))}
+                  />
+                  Mark as submitted immediately
+                </label>
+              )}
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  onClick={() => { setShowApproveModal(false); setActiveReq(null); }}
+                  className="px-3 py-2 rounded-md bg-slate-700 text-white hover:bg-slate-600"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmApprove}
+                  disabled={processingId === activeReq.id}
+                  className="px-3 py-2 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  Confirm Approve
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Message Modal */}
+      {showMessageModal && activeReq && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-lg bg-slate-900 border border-white/10 rounded-xl p-6 shadow-2xl">
+            <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+              <MessageSquare className="w-5 h-5 text-indigo-400" />
+              Send Message
+            </h3>
+            <div className="space-y-4">
+              <div className="text-sm text-gray-300">To: {formatUserDisplayName(activeReq.user, activeReq.user_id)}</div>
+              <textarea
+                value={messageForm.text}
+                onChange={(e) => setMessageForm((f) => ({ ...f, text: e.target.value }))}
+                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-md text-white min-h-[120px]"
+                placeholder="Write a message for the student..."
+              />
+              <label className="flex items-center gap-2 text-sm text-gray-200">
+                <input
+                  type="checkbox"
+                  checked={messageForm.notify}
+                  onChange={(e) => setMessageForm((f) => ({ ...f, notify: e.target.checked }))}
+                />
+                Notify via email
+              </label>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  onClick={() => { setShowMessageModal(false); setActiveReq(null); }}
+                  className="px-3 py-2 rounded-md bg-slate-700 text-white hover:bg-slate-600"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={sendMessage}
+                  disabled={processingId === activeReq.id}
+                  className="px-3 py-2 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  Send
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

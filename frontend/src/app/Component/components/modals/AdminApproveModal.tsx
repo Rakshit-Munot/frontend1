@@ -6,7 +6,7 @@ interface Props {
   student: { roll: string; email: string } | null;
   request: { id: number; itemName: string; quantity: number } | null;
   onClose: () => void;
-  onApprove: (opts: { returnDays?: number | null; returnDate?: string | null; remark?: string | null }) => void;
+  onApprove: (opts: { returnDays?: number | null; returnDate?: string | null; remark?: string | null; markSubmitted?: boolean }) => void;
   isBusy: boolean;
 }
 
@@ -14,6 +14,7 @@ export default function AdminApproveModal({ open, student, request, onClose, onA
   const [preset, setPreset] = useState<"7" | "15" | "30" | "custom">("7");
   const [customDate, setCustomDate] = useState<string>("");
   const [remark, setRemark] = useState<string>("");
+  const [markSubmitted, setMarkSubmitted] = useState<boolean>(false);
   // FIX: Removed 'banner' and 'setBanner' as they were unused
   // const [banner, setBanner] = useState<string | null>(null); 
 
@@ -65,6 +66,11 @@ export default function AdminApproveModal({ open, student, request, onClose, onA
             <div className="text-sm font-medium text-slate-800 mb-1">Remark (optional)</div>
             <textarea value={remark} onChange={(e) => setRemark(e.target.value)} rows={3} className="w-full rounded-md border dialog-divider-login px-3 py-2 text-sm" placeholder="Add a note (optional)" />
           </div>
+
+          <label className="inline-flex items-center gap-2 text-sm text-slate-800">
+            <input type="checkbox" checked={markSubmitted} onChange={(e) => setMarkSubmitted(e.target.checked)} />
+            Mark as submitted immediately
+          </label>
         </div>
 
         <div className="px-5 py-3 border-t flex items-center justify-end gap-2">
@@ -73,8 +79,8 @@ export default function AdminApproveModal({ open, student, request, onClose, onA
             disabled={isBusy || (preset === "custom" && !customDate)}
             onClick={() => {
               const payload = preset === "custom"
-                ? { returnDays: null, returnDate: customDate || null, remark: remark || null }
-                : { returnDays: Number(preset), returnDate: null, remark: remark || null };
+                ? { returnDays: null, returnDate: customDate || null, remark: remark || null, markSubmitted }
+                : { returnDays: Number(preset), returnDate: null, remark: remark || null, markSubmitted };
               // Fire approve and close immediately for instant UX; parent will handle actual update & WS revalidation
               onApprove(payload);
               onClose();

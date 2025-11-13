@@ -165,3 +165,63 @@ export async function prefetchAllInstruments(concurrency = 5): Promise<void> {
     // ignore
   }
 }
+
+// --- Issue Messages & Returns ---
+export interface IssueMessage {
+  id: number;
+  issue_request_id: number;
+  msg_type: "admin" | "system";
+  text?: string;
+  created_at: string;
+  creator_id?: number | null;
+}
+
+export async function listIssueMessages(requestId: number): Promise<IssueMessage[]> {
+  const res = await fetch(`${API_URL}/issue-requests/${requestId}/messages`, { credentials: "include", cache: "no-store" });
+  if (!res.ok) throw new Error("Failed to load messages");
+  return (await res.json()) as IssueMessage[];
+}
+
+export async function postIssueMessage(requestId: number, params: { text?: string; notify_email?: boolean }): Promise<IssueMessage> {
+  const res = await fetch(`${API_URL}/issue-requests/${requestId}/messages`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: params.text ?? "", notify_email: params.notify_email ?? true }),
+  });
+  if (!res.ok) throw new Error("Failed to post message");
+  return (await res.json()) as IssueMessage;
+}
+
+export async function submitReturn(requestId: number, params?: { message?: string; notify_email?: boolean }) {
+  const res = await fetch(`${API_URL}/issue-requests/${requestId}/submit`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: params?.message ?? "", notify_email: params?.notify_email ?? true }),
+  });
+  if (!res.ok) throw new Error("Failed to submit return");
+  return await res.json();
+}
+
+// --- Item detail helper (to know is_consumable etc.) ---
+export interface ItemDetailSnapshot {
+  id: number;
+  name: string;
+  category_id: number;
+  sub_category_id: number | null;
+  quantity: number;
+  is_consumable: boolean;
+  location?: string;
+  is_available: boolean;
+  min_issue_limit: number;
+  max_issue_limit: number;
+  description?: string;
+  available_quantity: number;
+}
+
+export async function getItem(itemId: number): Promise<ItemDetailSnapshot> {
+  const res = await fetch(`${API_URL}/items/${itemId}`, { credentials: "include", cache: "no-store" });
+  if (!res.ok) throw new Error("Failed to load item");
+  return (await res.json()) as ItemDetailSnapshot;
+}

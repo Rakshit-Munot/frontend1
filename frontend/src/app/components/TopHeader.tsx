@@ -7,6 +7,11 @@ import { useAuth } from "../AuthContext";
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import About from "./about";
+import HandoutManager from "./HandoutManager";
+import { prefetchHandouts, listHandoutYears } from "../Handouts/services/handoutsApi";
+import { prefetchBills, prefetchBillYears } from "../Dash/services/billsApi";
+import { listLabsCached } from "../Handouts/services/labsCache";
+import { prefetchCategories, prefetchAllInstruments } from "../Equipments/services/instrumentsApi";
 
 export default function TopHeader() {
   const pathname = usePathname();
@@ -39,6 +44,78 @@ export default function TopHeader() {
       setIsLoggingOut(false);
     }
   }, [isAuthenticated]);
+
+  // One-time warm-start prefetch to make key pages feel instant
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if ((window as any).__APP_WARMED) return;
+    (window as any).__APP_WARMED = true;
+
+    const run = async () => {
+      try {
+        const conn: any = (navigator as any).connection || {};
+        const slow = !!conn.saveData || ["slow-2g", "2g"].includes(conn.effectiveType);
+        const tasks = [
+          prefetchHandouts({ page: 1, limit: 10 }).catch(() => {}),
+          listHandoutYears().catch(() => {}),
+          listLabsCached().catch(() => {}),
+          prefetchBills({ page: 1, limit: 10 }).catch(() => {}),
+          prefetchBillYears().catch(() => {}),
+          prefetchCategories().catch(() => {}),
+        ];
+        // Deep prefetch of entire instruments catalog on normal connections
+        if (!slow) {
+          tasks.push(prefetchAllInstruments(5).catch(() => {}));
+        }
+        // On slow networks, still run but do not block; allSettled avoids throwing
+        await Promise.allSettled(tasks);
+      } catch {
+        // ignore
+      }
+    };
+    if (typeof (window as any).requestIdleCallback === "function") {
+      (window as any).requestIdleCallback(run, { timeout: 2000 });
+    } else {
+      setTimeout(run, 0);
+    }
+  }, []);
+
+  // Register service worker (production only) for static/API caching
+  useEffect(() => {
+    if (typeof window === "undefined" || process.env.NODE_ENV !== 'production') return;
+    if (!("serviceWorker" in navigator)) return;
+    (async () => {
+      try {
+        const existing = await navigator.serviceWorker.getRegistration('/');
+        if (!existing) {
+          await navigator.serviceWorker.register('/sw.js');
+        }
+      } catch {
+        // ignore
+      }
+    })();
+  }, []);
+
+  // Dev-only: ensure no stale SW/caches interfere with new UI during development
+  useEffect(() => {
+    if (typeof window === "undefined" || process.env.NODE_ENV === 'production') return;
+    (async () => {
+      try {
+        if ('serviceWorker' in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          for (const reg of regs) {
+            try { await reg.unregister(); } catch {}
+          }
+        }
+        if ((window as any).caches && typeof caches.keys === 'function') {
+          const keys = await caches.keys();
+          await Promise.all(keys.map((k) => caches.delete(k).catch(() => false)));
+        }
+      } catch {
+        // ignore
+      }
+    })();
+  }, []);
 
   const onLogout = async () => {
     if (isLoggingOut) return; // prevent double click
@@ -84,6 +161,16 @@ export default function TopHeader() {
               />
             </div>
           </Link>
+
+          {/* Primary Nav with click-to-toggle dropdowns (persistent until outside click) */}
+          <nav className="hidden md:flex items-center gap-6">
+            <PersistentDropdown label="Home" href="/" />
+            <PersistentDropdown label="Equipments" href="/Component" />
+            {/* Handouts dropdown */}
+             <PersistentDropdown label="Handouts" href="/Handouts" />
+            {/* Bills link visible only to admin */}
+            {user?.role === 'admin' && <PersistentDropdown label="Bills" href="/Dash" />}
+          </nav>
 
           {/* Auth/Profile */}
           <div className="flex items-center gap-3 flex-wrap">
@@ -255,5 +342,55 @@ export default function TopHeader() {
       )}
     </AnimatePresence>
     </>
+  );
+}
+
+// Reusable dropdown component: click toggles, persists until outside click
+function PersistentDropdown({ label, href, panel }: { label: string; href?: string; panel?: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+  // small prefetch mapping to warm caches on hover for instant feel
+  const prefetchMap: Record<string, () => void> = {
+    "/Handouts": () => { prefetchHandouts({ page: 1, limit: 10 }).catch(() => {}); listHandoutYears().catch(() => {}); },
+    "/Dash": () => { prefetchBills({ page: 1, limit: 10 }).catch(() => {}); prefetchBillYears().catch(() => {}); },
+    "/Component": () => { prefetchCategories().catch(() => {}); },
+    "/Equipments": () => { prefetchCategories().catch(() => {}); },
+    // add other mappings as needed
+  };
+
+  const handlePrefetch = () => {
+    if (href && prefetchMap[href]) {
+      try { prefetchMap[href](); } catch {}
+    }
+  };
+
+  const base = (
+    <button
+      onClick={() => setOpen((o) => !o)}
+      onMouseEnter={handlePrefetch}
+      className="px-3 py-1.5 rounded-md text-black text-base md:text-lg font-medium transition-colors duration-150 hover:text-white hover:bg-[#A31F34]"
+      type="button"
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div className="relative" ref={ref}>
+      {href && !panel ? <Link href={href}>{base}</Link> : base}
+      {panel && open && (
+        <div className="absolute left-0 top-full mt-2 rounded-xl border dialog-divider-login bg-white shadow-xl z-50" onClick={(e)=>e.stopPropagation()}>
+          {panel}
+        </div>
+      )}
+    </div>
   );
 }

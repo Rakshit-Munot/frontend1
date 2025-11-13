@@ -35,6 +35,8 @@ export interface IssueRequest {
   approved_at?: string | null;
   return_by?: string | null;
   remarks?: string;
+  submission_status?: "not_required" | "pending" | "submitted";
+  submitted_at?: string | null;
 }
 
 export type UserRole = "admin" | "faculty" | "staff" | "student" | "guest" | null;
