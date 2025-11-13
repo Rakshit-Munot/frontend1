@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useAuth } from "../AuthContext";
 import ViewItemModal from "./components/modals/ViewItemModal";
 import EditItemModal from "./components/modals/EditItemModal";
@@ -32,6 +32,54 @@ export default function InstrumentsPage() {
   // Unread indicators for per-request messages
   const [unreadReqIds, setUnreadReqIds] = useState<Set<number>>(new Set());
   const [reqLastMsgAt, setReqLastMsgAt] = useState<Record<number, string>>({});
+  const [lastReadAt, setLastReadAt] = useState<Record<number, string>>({});
+  const lastReadAtRef = useRef<Record<number, string>>({});
+  useEffect(() => { lastReadAtRef.current = lastReadAt; }, [lastReadAt]);
+  // Restore unread/read state on mount
+  useEffect(() => {
+    try {
+      const rawIds = typeof window !== 'undefined' ? localStorage.getItem('instruments.unreadIds') : null;
+      if (rawIds) {
+        const arr = JSON.parse(rawIds) as number[];
+        if (Array.isArray(arr)) setUnreadReqIds(new Set(arr));
+      }
+      const rawRead = typeof window !== 'undefined' ? localStorage.getItem('instruments.lastReadAt') : null;
+      if (rawRead) {
+        const obj = JSON.parse(rawRead) as Record<number, string>;
+        if (obj && typeof obj === 'object') setLastReadAt(obj);
+      }
+      const rawLastMsg = typeof window !== 'undefined' ? localStorage.getItem('instruments.lastMsgAt') : null;
+      if (rawLastMsg) {
+        const obj = JSON.parse(rawLastMsg) as Record<number, string>;
+        if (obj && typeof obj === 'object') setReqLastMsgAt(obj);
+      }
+    } catch {}
+  }, []);
+  // Persist unread and last-read to localStorage
+  useEffect(() => {
+    try { if (typeof window !== 'undefined') localStorage.setItem('instruments.unreadIds', JSON.stringify(Array.from(unreadReqIds))); } catch {}
+  }, [unreadReqIds]);
+  useEffect(() => {
+    try { if (typeof window !== 'undefined') localStorage.setItem('instruments.lastReadAt', JSON.stringify(lastReadAt)); } catch {}
+  }, [lastReadAt]);
+  useEffect(() => {
+    try { if (typeof window !== 'undefined') localStorage.setItem('instruments.lastMsgAt', JSON.stringify(reqLastMsgAt)); } catch {}
+  }, [reqLastMsgAt]);
+  // After restoring lastMsgAt and lastReadAt, ensure unread set includes all threads with newer messages
+  useEffect(() => {
+    const keys = Object.keys(reqLastMsgAt);
+    if (!keys.length) return;
+    setUnreadReqIds((prev) => {
+      const next = new Set(prev);
+      for (const k of keys) {
+        const id = Number(k);
+        const lastMsg = reqLastMsgAt[id];
+        const lastRead = lastReadAt[id];
+        if (lastMsg && (!lastRead || lastMsg > lastRead)) next.add(id);
+      }
+      return next;
+    });
+  }, [reqLastMsgAt, lastReadAt]);
   const [requests, setRequests] = useState<IssueRequest[]>([]);
   const [requestsLoading, setRequestsLoading] = useState(false);
   const [requestsPrimed, setRequestsPrimed] = useState(false);
@@ -283,13 +331,21 @@ export default function InstrumentsPage() {
               // Only mark unread when the other side sent the message
               const myId = (user as any)?.id as number | undefined;
               if (!myId || (creatorId && creatorId !== myId)) {
-                setUnreadReqIds((prev) => new Set(prev).add(reqId));
                 if (at) setReqLastMsgAt((m) => ({ ...m, [reqId]: at }));
+                // Respect last read timestamps on this device
+                const last = lastReadAtRef.current[reqId];
+                if (!last || (at && at > last)) {
+                  setUnreadReqIds((prev) => {
+                    const next = new Set(prev); next.add(reqId); return next;
+                  });
+                }
               }
               // Bubble up a DOM event so modals can append live messages
               try {
                 if (typeof window !== 'undefined') {
-                  window.dispatchEvent(new CustomEvent('issue-request-message', { detail: payload }));
+                  const enriched: any = { ...payload };
+                  if (!enriched.sender_name) enriched.sender_name = enriched.msg_type === 'system' ? 'System' : 'Admin';
+                  window.dispatchEvent(new CustomEvent('issue-request-message', { detail: enriched }));
                 }
               } catch {}
             }
@@ -335,13 +391,18 @@ export default function InstrumentsPage() {
             if (reqId) {
               const myId = (user as any)?.id as number | undefined;
               if (!myId || (creatorId && creatorId !== myId)) {
-                setUnreadReqIds((prev) => new Set(prev).add(reqId));
                 if (at) setReqLastMsgAt((m) => ({ ...m, [reqId]: at }));
+                const last = lastReadAtRef.current[reqId];
+                if (!last || (at && at > last)) {
+                  setUnreadReqIds((prev) => { const n = new Set(prev); n.add(reqId); return n; });
+                }
               }
               // Bubble up a DOM event so modals can append live messages
               try {
                 if (typeof window !== 'undefined') {
-                  window.dispatchEvent(new CustomEvent('issue-request-message', { detail: payload }));
+                  const enriched: any = { ...payload };
+                  if (!enriched.sender_name) enriched.sender_name = enriched.msg_type === 'system' ? 'System' : 'Admin';
+                  window.dispatchEvent(new CustomEvent('issue-request-message', { detail: enriched }));
                 }
               } catch {}
             }
@@ -1725,7 +1786,10 @@ export default function InstrumentsPage() {
               optItems={myRequests}
               optLoading={myReqLoading}
               unreadIds={unreadReqIds}
-              onOpenThread={(reqId) => setUnreadReqIds((prev) => { const n = new Set(prev); n.delete(reqId); return n; })}
+              onOpenThread={(reqId) => {
+                setUnreadReqIds((prev) => { const n = new Set(prev); n.delete(reqId); return n; });
+                setLastReadAt((m) => ({ ...m, [reqId]: (reqLastMsgAt[reqId] || new Date().toISOString()) }));
+              }}
             />
           )}
 
@@ -2124,7 +2188,10 @@ export default function InstrumentsPage() {
           setSelectedReqIds(new Set((ids || []).filter(Boolean)));
           setTimeout(() => setBulkRejectOpen(true), 0);
         }}
-        onOpenThread={(reqId) => setUnreadReqIds((prev) => { const n = new Set(prev); n.delete(reqId); return n; })}
+        onOpenThread={(reqId) => {
+          setUnreadReqIds((prev) => { const n = new Set(prev); n.delete(reqId); return n; });
+          setLastReadAt((m) => ({ ...m, [reqId]: (reqLastMsgAt[reqId] || new Date().toISOString()) }));
+        }}
         onMarkSubmitted={(ids) => {
           if (!Array.isArray(ids) || ids.length === 0) return;
           // Optimistically mark submitted in the student modal list
@@ -2396,14 +2463,26 @@ function StudentMyRequests({ wsTick, optItems, optLoading, unreadIds, onOpenThre
                 </div>
                 <div className="mt-2">
                   <button
-                    className="rounded-md border dialog-divider-login px-2 py-1 text-xs hover:bg-slate-50 cursor-pointer"
+                    className="relative rounded-md border dialog-divider-login px-2 py-1 text-xs hover:bg-slate-50 cursor-pointer"
                     onClick={async () => {
                       setMsgOpenFor(req.id);
                       setMsgLoading(true);
                       try {
                         const r = await fetch(`${API_URL}/issue-requests/${req.id}/messages`, { credentials: "include" });
                         const d = await r.json();
-                        setThread(Array.isArray(d) ? d : []);
+                        // Normalize sender for student view: System for system, else sender_name from backend
+                        if (Array.isArray(d)) {
+                          setThread(
+                            d.map((m: any) => ({
+                              id: m.id,
+                              text: m.text,
+                              created_at: m.created_at,
+                              sender: m.msg_type === 'system' ? 'System' : (m.sender_name || 'Admin'),
+                            }))
+                          );
+                        } else {
+                          setThread([]);
+                        }
                       } catch {
                         setThread([]);
                       } finally {
@@ -2414,7 +2493,7 @@ function StudentMyRequests({ wsTick, optItems, optLoading, unreadIds, onOpenThre
                   >
                     Messages
                     {unreadIds?.has(req.id) && (
-                      <span className="ml-1 inline-block w-2 h-2 rounded-full bg-indigo-600 align-middle" />
+                      <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-indigo-600" />
                     )}
                   </button>
                 </div>
@@ -2464,3 +2543,5 @@ function StudentMyRequests({ wsTick, optItems, optLoading, unreadIds, onOpenThre
     </>
   );
 }
+
+// Students are read-only for messages; no composer here

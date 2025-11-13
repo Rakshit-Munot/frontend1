@@ -39,6 +39,8 @@ export default function StudentRequestsModal({ open, user, requests, loading, st
         : requests.filter((r) => r.status === status);
   // Optional sorting for approved tab
   const [sortApproved, setSortApproved] = useState<"newest" | "oldest" | "unread">("newest");
+  // Optional sorting for submitted tab
+  const [sortSubmitted, setSortSubmitted] = useState<"newest" | "oldest">("newest");
   if (status === "approved") {
     display = [...display].sort((a, b) => {
       if (sortApproved === "unread") {
@@ -52,6 +54,13 @@ export default function StudentRequestsModal({ open, user, requests, loading, st
       const ta = a.approved_at || a.created_at || "";
       const tb = b.approved_at || b.created_at || "";
       return sortApproved === "newest" ? (tb || "").localeCompare(ta || "") : (ta || "").localeCompare(tb || "");
+    });
+  }
+  if (status === "submitted") {
+    display = [...display].sort((a, b) => {
+      const ta = a.submitted_at || a.created_at || "";
+      const tb = b.submitted_at || b.created_at || "";
+      return sortSubmitted === "newest" ? (tb || "").localeCompare(ta || "") : (ta || "").localeCompare(tb || "");
     });
   }
   const totalPages = Math.ceil(display.length / 10) || 1;
@@ -162,7 +171,19 @@ export default function StudentRequestsModal({ open, user, requests, loading, st
     try {
       const r = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/instruments/issue-requests/${reqId}/messages`, { credentials: "include" });
       const d = await r.json();
-      setMsgThread(Array.isArray(d) ? d : []);
+      // Normalize sender name: system vs actual sender
+      if (Array.isArray(d)) {
+        setMsgThread(
+          d.map((m: any) => ({
+            id: m.id,
+            text: m.text,
+            created_at: m.created_at,
+            sender: m.msg_type === 'system' ? 'System' : (m.sender_name || 'Admin'),
+          }))
+        );
+      } else {
+        setMsgThread([]);
+      }
     } catch {
       setMsgThread([]);
     } finally {
@@ -181,7 +202,7 @@ export default function StudentRequestsModal({ open, user, requests, loading, st
         const text = (detail?.text as string) || "";
         const id = (detail?.id as number) || Math.floor(Math.random() * 1e9);
         const created_at = (detail?.created_at as string) || new Date().toISOString();
-        const sender = detail?.msg_type === 'system' ? 'System' : (detail?.sender || 'Admin');
+        const sender = detail?.msg_type === 'system' ? 'System' : (detail?.sender_name || 'Admin');
         setMsgThread((arr) => [...arr, { id, text, created_at, sender }]);
       } catch {}
     };
@@ -199,20 +220,19 @@ export default function StudentRequestsModal({ open, user, requests, loading, st
   };
 
   const sendMessages = async () => {
-    setBusyApproved(true);
-    try {
-      const ids = hasAnySelected ? Array.from(selected).filter((id) => approvedIds.includes(id)) : approvedIds;
-      for (const id of ids) {
-        await fetch(`${process.env.NEXT_PUBLIC_API_URL}/instruments/issue-requests/${id}/messages`, {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: msgText || "Please return the instrument.", notify_email: msgNotify }),
-        }).catch(() => {});
-      }
-    } finally {
-      setBusyApproved(false);
-      setMsgOpen(false);
+    // Close immediately; send in background without blocking UI
+    const ids = hasAnySelected ? Array.from(selected).filter((id) => approvedIds.includes(id)) : approvedIds;
+    const text = msgText || "Please return the instrument.";
+    const notify = msgNotify;
+    setMsgOpen(false);
+    // Fire-and-forget per id
+    for (const id of ids) {
+      fetch(`${process.env.NEXT_PUBLIC_API_URL}/instruments/issue-requests/${id}/messages`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, notify_email: notify }),
+      }).catch(() => {});
     }
   };
 
@@ -264,7 +284,9 @@ export default function StudentRequestsModal({ open, user, requests, loading, st
                   {status === "approved" && (
                     <>
                       <button className="rounded-md bg-emerald-600 text-white text-xs px-3 py-1.5 disabled:opacity-50 cursor-pointer hover:bg-emerald-700" disabled={!canBulkApprovedActions || busyApproved || !hasAnySelected} onClick={markConsumedSubmit} title="Mark selected as submitted">Mark Submitted</button>
-                      <button className="rounded-md bg-slate-800 text-white text-xs px-3 py-1.5 disabled:opacity-50 cursor-pointer hover:bg-slate-700" disabled={!canBulkApprovedActions || busyApproved} onClick={openMessageModal} title="Not submitted → send message">Not Submitted → Message</button>
+                      {hasAnySelected && (
+                        <button className="rounded-md bg-slate-800 text-white text-xs px-3 py-1.5 cursor-pointer hover:bg-slate-700" onClick={openMessageModal} title="Not submitted → send message">Not Submitted → Message</button>
+                      )}
                     </>
                   )}
                 </div>
@@ -296,6 +318,15 @@ export default function StudentRequestsModal({ open, user, requests, loading, st
               </select>
             </div>
           )}
+          {status === "submitted" && (
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-slate-600">Sort:</span>
+              <select className="rounded border px-2 py-1 bg-white" value={sortSubmitted} onChange={(e) => setSortSubmitted(e.target.value as any)}>
+                <option value="newest">Newest</option>
+                <option value="oldest">Oldest</option>
+              </select>
+            </div>
+          )}
         </div>
 
         <div className="p-5 max-h-[60vh] overflow-y-auto">
@@ -305,7 +336,21 @@ export default function StudentRequestsModal({ open, user, requests, loading, st
             <div className="py-12 text-center text-slate-500">No requests</div>
           ) : (
             <div className="space-y-3">
-              {displaySlice.map((req) => (
+              {displaySlice.map((req) => {
+                // Derive clean remark and submitted display
+                const remarkLines = (req.remarks || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+                const submittedLineIdx = remarkLines.findIndex((l) => /^(submitted\s+(on|at)|consumable\s+submitted\s+at)\b/i.test(l));
+                const submittedLine = submittedLineIdx >= 0 ? remarkLines[submittedLineIdx] : null;
+                const cleanRemark = remarkLines.filter((_, i) => i !== submittedLineIdx).join(" \u2022 ");
+                let submittedText: string | null = null;
+                if (req.submission_status === "not_required") {
+                  submittedText = "Not required";
+                } else if (req.submitted_at) {
+                  try { submittedText = new Date(req.submitted_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: false }) + " IST"; } catch { submittedText = new Date(req.submitted_at as any).toLocaleString(); }
+                } else if (submittedLine) {
+                  submittedText = submittedLine.replace(/^consumable\s+submitted\s+at\s*/i, "").replace(/^submitted\s+(on|at)\s*/i, "");
+                }
+                return (
                 <div key={req.id} className="rounded-lg border dialog-divider-login p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
@@ -313,9 +358,14 @@ export default function StudentRequestsModal({ open, user, requests, loading, st
                         {typeof req.item === "object" && (req.item as { name?: string })?.name ? (req.item as { name: string }).name : String(req.item)}
                       </div>
                       <div className="text-xs text-slate-500 truncate">Status: {req.status}</div>
-                      {req.remarks && (
-                        <div className="mt-1 text-xs text-slate-600 truncate" title={req.remarks}>
-                          Remark: <span className="text-slate-700">{req.remarks}</span>
+                      {cleanRemark && (
+                        <div className="mt-1 text-xs text-slate-600 truncate" title={cleanRemark}>
+                          Remarks: <span className="text-slate-700">{cleanRemark}</span>
+                        </div>
+                      )}
+                      {submittedText && (
+                        <div className="mt-1 text-xs text-slate-600 truncate" title={submittedText}>
+                          Submitted: <span className="text-slate-700">{submittedText}</span>
                         </div>
                       )}
                     </div>
@@ -365,7 +415,8 @@ export default function StudentRequestsModal({ open, user, requests, loading, st
                     </button>
                   </div>
                 </div>
-              ))}
+                );
+              })}
               {totalPages > 1 && (
                 <div className="mt-2 flex items-center justify-center gap-2 text-xs text-slate-600">
                   <span>Page {pageLocal} of {totalPages}</span>
