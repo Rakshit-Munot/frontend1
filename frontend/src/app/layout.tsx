@@ -5,7 +5,6 @@ import './custom.scss';
 import { GoogleOAuthProvider } from "@react-oauth/google";
 import { AuthProvider } from "./AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute"
-import SidebarDrawer from "./components/SidebarDrawer";
 import TopHeader from "./components/TopHeader"
 // Fonts
 const geistSans = Geist({
@@ -41,7 +40,6 @@ export default function RootLayout({
             celery -A backend1 worker -l info -P solo
             */}
             {/* Global sidebar drawer visible on all pages */}
-            <SidebarDrawer />
             {/* Global top header with LNMIIT logo (left) and profile icon (right) */}
             <TopHeader />
             <ProtectedRoute>
